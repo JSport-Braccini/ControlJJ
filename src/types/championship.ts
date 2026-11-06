@@ -1,4 +1,4 @@
-export type ActiveTab = 'resumen' | 'escaner' | 'jugadores' | 'espectadores' | 'bebidas' | 'torneos' | 'usuarios' | 'configuracion';
+export type ActiveTab = 'resumen' | 'jugadores' | 'espectadores' | 'bebidas' | 'gastos' | 'reporte' | 'torneos' | 'usuarios' | 'configuracion';
 
 export type UserRole = 'ADMIN' | 'CONTROL_JUGADORES' | 'CONTROL_ESPECTADORES' | 'CONTROL_BEBIDAS';
 
@@ -35,7 +35,18 @@ export interface Player {
   duplicateAttempts: number;
 }
 
-export type SpectatorTicketType = 'ADULTO' | 'NINO' | 'VIP';
+export type SpectatorTicketType = 'ADULTO' | 'NINO' | 'VIP' | 'GRATIS';
+
+export interface ExpenseItem {
+  id: string;
+  tournamentId: string;
+  concept: string;
+  category: 'ARBITRAJE' | 'CANCHA' | 'LOGISTICA' | 'PREMIOS' | 'PERSONAL' | 'OTROS';
+  amount: number;
+  date: string;
+  registeredBy?: string;
+  notes?: string;
+}
 
 export interface SpectatorTier {
   id: string;
@@ -117,6 +128,7 @@ export interface TournamentState {
   spectatorEntries: SpectatorEntry[];
   beverages: BeverageProduct[];
   beverageSales: BeverageSale[];
+  expenses: ExpenseItem[];
   scanHistory: ScanFeedback[];
 }
 

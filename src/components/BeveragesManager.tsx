@@ -406,92 +406,143 @@ export const BeveragesManager: React.FC<BeveragesManagerProps> = ({
         })}
       </div>
 
-      {/* Historial de Ventas - VISTA MÓVIL Y DESKTOP */}
+      {/* Resumen Consolidado de Ventas por Tipo de Bebida */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs w-full max-w-full">
-        <div className="px-4 sm:px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-slate-900">
-            Historial de Ventas de Bebidas ({sales.length} transacciones)
-          </h3>
-          <span className="text-[11px] text-slate-500">Sincronizado en la nube</span>
+        <div className="px-4 sm:px-5 py-3.5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm sm:text-base font-bold text-slate-900">
+              Conteo Consolidado de Ventas por Tipo de Bebida
+            </h3>
+            <p className="text-[11px] sm:text-xs text-slate-500">
+              Unidades vendidas y recaudación acumulada por cada producto
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              {totalUnitsSold} unidades vendidas
+            </span>
+          </div>
         </div>
 
         {/* Tarjetas Móviles (sm:hidden) */}
-        <div className="sm:hidden divide-y divide-slate-100">
-          {sales.length === 0 ? (
-            <div className="py-8 text-center text-xs text-slate-500">
-              Aún no se han registrado ventas de bebidas en este torneo.
-            </div>
-          ) : (
-            sales.slice(0, 30).map((sale) => (
-              <div key={sale.id} className="p-3.5 space-y-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-900">{sale.beverageName}</span>
-                  <span className="font-mono-tabular font-bold text-emerald-700">
-                    S/ {sale.totalAmount.toFixed(2)}
+        <div className="sm:hidden p-3.5 space-y-3">
+          {beverages.map((bev) => {
+            const subtotal = bev.soldCount * bev.price;
+            return (
+              <div
+                key={bev.id}
+                className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/50 space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-slate-900 text-sm block">{bev.name}</span>
+                    <span className="text-[11px] text-slate-500">{bev.presentation}</span>
+                  </div>
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-200/60 text-slate-700 font-semibold">
+                    {bev.qrCode}
                   </span>
                 </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-500">
-                  <span className="font-mono-tabular">{sale.qrCode} · {sale.quantity} unidad(es)</span>
-                  <span className="font-mono-tabular">{sale.timestamp}</span>
-                </div>
-                <div className="text-[11px] text-slate-500 flex items-center justify-between">
-                  <span>Ref: {sale.buyerNote || 'Venta directa'}</span>
-                  <span>S/ {sale.unitPrice.toFixed(2)} c/u</span>
+
+                <div className="grid grid-cols-4 gap-1.5 pt-1 border-t border-slate-200/60 text-center">
+                  <div className="bg-white p-1.5 rounded border border-slate-100">
+                    <span className="block text-[9px] text-slate-500 uppercase tracking-wider font-semibold">Precio</span>
+                    <span className="text-xs font-bold text-slate-800">
+                      S/ {bev.price.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="bg-white p-1.5 rounded border border-slate-100">
+                    <span className="block text-[9px] text-slate-500 uppercase tracking-wider font-semibold">Stock</span>
+                    <span className="text-xs font-semibold text-slate-600 font-mono-tabular">
+                      {bev.stock}
+                    </span>
+                  </div>
+                  <div className="bg-white p-1.5 rounded border border-slate-100">
+                    <span className="block text-[9px] text-slate-500 uppercase tracking-wider font-semibold">Vendidas</span>
+                    <span className="text-sm font-bold text-slate-900 font-mono-tabular">
+                      {bev.soldCount}
+                    </span>
+                  </div>
+                  <div className="bg-white p-1.5 rounded border border-slate-100">
+                    <span className="block text-[9px] text-slate-500 uppercase tracking-wider font-semibold">Total</span>
+                    <span className="text-xs font-bold text-emerald-700 font-mono-tabular">
+                      S/ {subtotal.toFixed(2)}
+                    </span>
+                  </div>
                 </div>
               </div>
-            ))
-          )}
+            );
+          })}
+
+          <div className="p-3 bg-slate-900 text-white rounded-lg flex items-center justify-between text-xs font-bold">
+            <span>TOTAL VENTAS DE BEBIDAS</span>
+            <span className="font-mono-tabular text-sm text-emerald-400">
+              S/ {totalRevenue.toFixed(2)}
+            </span>
+          </div>
         </div>
 
         {/* Tabla Desktop (hidden sm:block) */}
         <div className="hidden sm:block overflow-x-auto w-full">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/70 text-[11px] font-semibold text-slate-500">
-                <th className="py-2.5 px-5">Hora</th>
-                <th className="py-2.5 px-3">Código QR</th>
-                <th className="py-2.5 px-3">Bebida</th>
-                <th className="py-2.5 px-3">Referencia</th>
-                <th className="py-2.5 px-3 text-right">Cantidad</th>
-                <th className="py-2.5 px-3 text-right">P. Unit.</th>
-                <th className="py-2.5 px-5 text-right">Subtotal (S/)</th>
+              <tr className="border-b border-slate-200 bg-slate-50/70 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                <th className="py-3 px-5">Bebida / Producto</th>
+                <th className="py-3 px-4">Presentación</th>
+                <th className="py-3 px-4">Código QR</th>
+                <th className="py-3 px-4 text-right">Precio Unit.</th>
+                <th className="py-3 px-4 text-right">Stock Disponible</th>
+                <th className="py-3 px-4 text-right">Unidades Vendidas</th>
+                <th className="py-3 px-5 text-right">Total Recaudado</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
-              {sales.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-500">
-                    Aún no se han registrado ventas de bebidas en este torneo.
-                  </td>
-                </tr>
-              ) : (
-                sales.map((sale) => (
-                  <tr key={sale.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-2.5 px-5 font-mono-tabular text-slate-500">
-                      {sale.timestamp}
+              {beverages.map((bev) => {
+                const subtotal = bev.soldCount * bev.price;
+                return (
+                  <tr key={bev.id} className="hover:bg-slate-50/80 transition-colors">
+                    <td className="py-3 px-5 font-semibold text-slate-900 flex items-center gap-2">
+                      <CupSoda className="w-4 h-4 text-slate-500" />
+                      {bev.name}
                     </td>
-                    <td className="py-2.5 px-3 font-mono-tabular font-medium text-slate-800">
-                      {sale.qrCode}
+                    <td className="py-3 px-4 text-xs text-slate-600">
+                      {bev.presentation}
                     </td>
-                    <td className="py-2.5 px-3 font-semibold text-slate-900">
-                      {sale.beverageName}
+                    <td className="py-3 px-4 font-mono-tabular text-xs font-medium text-slate-600">
+                      {bev.qrCode}
                     </td>
-                    <td className="py-2.5 px-3 text-xs text-slate-500">
-                      {sale.buyerNote || 'Venta directa'}
+                    <td className="py-3 px-4 text-right font-mono-tabular text-slate-700">
+                      S/ {bev.price.toFixed(2)}
                     </td>
-                    <td className="py-2.5 px-3 text-right font-mono-tabular font-semibold text-slate-900">
-                      {sale.quantity}
+                    <td className="py-3 px-4 text-right font-mono-tabular text-slate-600">
+                      {bev.stock} unid.
                     </td>
-                    <td className="py-2.5 px-3 text-right font-mono-tabular text-slate-600">
-                      S/ {sale.unitPrice.toFixed(2)}
+                    <td className="py-3 px-4 text-right font-mono-tabular font-bold text-slate-900 text-base">
+                      {bev.soldCount}
                     </td>
-                    <td className="py-2.5 px-5 text-right font-mono-tabular font-semibold text-slate-900">
-                      S/ {sale.totalAmount.toFixed(2)}
+                    <td className="py-3 px-5 text-right font-mono-tabular font-bold text-emerald-700">
+                      S/ {subtotal.toFixed(2)}
                     </td>
                   </tr>
-                ))
-              )}
+                );
+              })}
             </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-slate-300 bg-slate-100/70 font-bold text-sm text-slate-900">
+                <td colSpan={4} className="py-3 px-5 uppercase tracking-wide">
+                  Totales de Bebidas
+                </td>
+                <td className="py-3 px-4 text-right font-mono-tabular text-slate-700">
+                  {totalStock} unid.
+                </td>
+                <td className="py-3 px-4 text-right font-mono-tabular text-base text-slate-900">
+                  {totalUnitsSold} unid.
+                </td>
+                <td className="py-3 px-5 text-right font-mono-tabular text-base text-emerald-700">
+                  S/ {totalRevenue.toFixed(2)}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>

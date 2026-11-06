@@ -6,6 +6,7 @@ import {
   SpectatorEntry,
   BeverageProduct,
   BeverageSale,
+  ExpenseItem,
 } from '../types/championship';
 
 export const DEFAULT_TOURNAMENT: Tournament = {
@@ -178,6 +179,16 @@ export const INITIAL_SPECTATOR_TIERS: SpectatorTier[] = [
     isChild: false,
     description: 'Zona preferencial techada cerca al campo principal',
   },
+  {
+    id: 'tier-gratis',
+    tournamentId: 'tour-clausura-2026',
+    type: 'GRATIS',
+    label: 'Entrada Libre / Cortesía',
+    qrCode: 'ESP-GRATIS',
+    price: 0.0,
+    isChild: false,
+    description: 'Acceso libre para delegados, invitados especiales o cortesías',
+  },
 ];
 
 export const INITIAL_SPECTATOR_ENTRIES: SpectatorEntry[] = [
@@ -340,6 +351,29 @@ export const INITIAL_BEVERAGE_SALES: BeverageSale[] = [
   },
 ];
 
+export const INITIAL_EXPENSES: ExpenseItem[] = [
+  {
+    id: 'exp-1',
+    tournamentId: 'tour-clausura-2026',
+    concept: 'Arbitraje oficial jornada cuartos de final (2 partidos)',
+    category: 'ARBITRAJE',
+    amount: 140.0,
+    date: '2026-11-05',
+    registeredBy: 'Administración JJ',
+    notes: 'Terna arbitral colegiada',
+  },
+  {
+    id: 'exp-2',
+    tournamentId: 'tour-clausura-2026',
+    concept: 'Alquiler de campo sintético y reflectores (3 horas)',
+    category: 'CANCHA',
+    amount: 180.0,
+    date: '2026-11-05',
+    registeredBy: 'Administración JJ',
+    notes: 'Pago de alquiler Complejo Las Palmas',
+  },
+];
+
 export function createInitialTournamentState(tournament: Tournament): TournamentState {
   const isDefault = tournament.id === DEFAULT_TOURNAMENT.id;
   return {
@@ -376,6 +410,7 @@ export function createInitialTournamentState(tournament: Tournament): Tournament
           soldCount: 0,
         })),
     beverageSales: isDefault ? INITIAL_BEVERAGE_SALES : [],
+    expenses: isDefault ? INITIAL_EXPENSES : [],
     scanHistory: [],
   };
 }

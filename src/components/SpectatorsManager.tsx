@@ -13,6 +13,7 @@ import {
   QrCode,
   Shield,
   Camera,
+  Gift,
 } from 'lucide-react';
 import { SpectatorTier, SpectatorEntry, SpectatorTicketType, UserRole } from '../types/championship';
 import { QrCodeImage } from './QrCodeImage';
@@ -54,6 +55,7 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
   const [newLabel, setNewLabel] = useState('');
   const [newPrice, setNewPrice] = useState<number>(10);
   const [newIsChild, setNewIsChild] = useState(false);
+  const [newIsGratis, setNewIsGratis] = useState(false);
   const [newDescription, setNewDescription] = useState('');
 
   // Form edit tier
@@ -62,10 +64,15 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
   const [editDescription, setEditDescription] = useState('');
 
   const totalSpectators = entries.reduce((acc, e) => acc + e.quantity, 0);
+  const totalFree = entries
+    .filter((e) => e.ticketType === 'GRATIS' || e.price === 0)
+    .reduce((acc, e) => acc + e.quantity, 0);
   const totalChildren = entries
     .filter((e) => e.isChild)
     .reduce((acc, e) => acc + e.quantity, 0);
-  const totalAdultsAndVip = totalSpectators - totalChildren;
+  const totalAdultsAndVip = entries
+    .filter((e) => (e.ticketType === 'ADULTO' || e.ticketType === 'VIP') && !e.isChild && e.price > 0)
+    .reduce((acc, e) => acc + e.quantity, 0);
   const totalRevenue = entries.reduce((acc, e) => acc + e.totalAmount, 0);
 
   const handleOpenAdd = () => {
@@ -111,7 +118,14 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
   const handleSaveAdd = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newLabel.trim()) return;
-    const type: SpectatorTicketType = newIsChild ? 'NINO' : 'ADULTO';
+    let type: SpectatorTicketType = 'ADULTO';
+    if (newIsGratis || Number(newPrice) === 0) {
+      type = 'GRATIS';
+    } else if (newIsChild) {
+      type = 'NINO';
+    } else if (newLabel.toUpperCase().includes('VIP')) {
+      type = 'VIP';
+    }
     const codeSuffix = newLabel.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
     const newTier: SpectatorTier = {
       id: `tier-${Date.now()}`,
@@ -119,9 +133,9 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
       type,
       label: newLabel.trim(),
       qrCode: `ESP-${codeSuffix || Date.now().toString().slice(-4)}`,
-      price: Math.max(0, Number(newPrice) || 0),
+      price: newIsGratis ? 0 : Math.max(0, Number(newPrice) || 0),
       isChild: newIsChild,
-      description: newDescription.trim() || 'Entrada para control de acceso',
+      description: newDescription.trim() || (newIsGratis ? 'Entrada cortesía / libre acceso' : 'Entrada para control de acceso'),
     };
     onAddTicketTier(newTier);
     setShowAddModal(false);
@@ -175,56 +189,69 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
       </div>
 
       {/* KPI Bar */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+        <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-xs">
           <div className="text-xs text-slate-500 flex items-center justify-between">
             <span>Total Espectadores</span>
             <Users className="w-4 h-4 text-slate-400" />
           </div>
-          <div className="mt-1.5 text-2xl sm:text-3xl font-bold font-mono-tabular text-slate-900">
+          <div className="mt-1.5 text-xl sm:text-2xl font-bold font-mono-tabular text-slate-900">
             {totalSpectators}
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-400">
-            Asistentes registrados
+          <div className="mt-0.5 text-[10px] text-slate-400">
+            Asistentes en puerta
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs">
-          <div className="text-xs text-slate-500 flex items-center justify-between">
-            <span>Niños / Menores</span>
-            <Baby className="w-4 h-4 text-emerald-600" />
-          </div>
-          <div className="mt-1.5 text-2xl sm:text-3xl font-bold font-mono-tabular text-emerald-700">
-            {totalChildren}
-          </div>
-          <div className="mt-0.5 text-[11px] text-slate-400">
-            {totalSpectators > 0 ? Math.round((totalChildren / totalSpectators) * 100) : 0}% de la taquilla
-          </div>
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs">
+        <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-xs">
           <div className="text-xs text-slate-500 flex items-center justify-between">
             <span>Adultos y VIP</span>
-            <Ticket className="w-4 h-4 text-slate-400" />
+            <Ticket className="w-4 h-4 text-slate-600" />
           </div>
-          <div className="mt-1.5 text-2xl sm:text-3xl font-bold font-mono-tabular text-slate-900">
+          <div className="mt-1.5 text-xl sm:text-2xl font-bold font-mono-tabular text-slate-900">
             {totalAdultsAndVip}
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-400">
-            General y preferenciales
+          <div className="mt-0.5 text-[10px] text-slate-400">
+            Boletos pagados
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs">
+        <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-xs">
           <div className="text-xs text-slate-500 flex items-center justify-between">
-            <span>Recaudación Entradas</span>
+            <span>Niños / Menores</span>
+            <Baby className="w-4 h-4 text-blue-600" />
+          </div>
+          <div className="mt-1.5 text-xl sm:text-2xl font-bold font-mono-tabular text-blue-700">
+            {totalChildren}
+          </div>
+          <div className="mt-0.5 text-[10px] text-slate-400">
+            Tarifa infantil
+          </div>
+        </div>
+
+        <div className="bg-white border border-emerald-200 rounded-xl p-3 sm:p-4 shadow-xs bg-emerald-50/30">
+          <div className="text-xs text-emerald-800 font-semibold flex items-center justify-between">
+            <span>Entradas Gratis</span>
+            <Gift className="w-4 h-4 text-emerald-600" />
+          </div>
+          <div className="mt-1.5 text-xl sm:text-2xl font-bold font-mono-tabular text-emerald-700">
+            {totalFree}
+          </div>
+          <div className="mt-0.5 text-[10px] text-emerald-600">
+            Cortesías e invitados
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-xs col-span-2 lg:col-span-1">
+          <div className="text-xs text-slate-500 flex items-center justify-between">
+            <span>Total Recaudado</span>
             <Sparkles className="w-4 h-4 text-emerald-600" />
           </div>
-          <div className="mt-1.5 text-2xl sm:text-3xl font-bold font-mono-tabular text-emerald-700">
+          <div className="mt-1.5 text-xl sm:text-2xl font-bold font-mono-tabular text-emerald-700">
             S/ {totalRevenue.toFixed(2)}
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-400">
-            Total en taquilla
+          <div className="mt-0.5 text-[10px] text-slate-400">
+            Taquilla acumulada
           </div>
         </div>
       </div>
@@ -387,100 +414,156 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
         })}
       </div>
 
-      {/* Historial de Ingresos - VISTA MÓVIL Y DESKTOP */}
+      {/* Resumen Consolidado de Conteo por Tipo de Entrada */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs w-full max-w-full">
-        <div className="px-4 sm:px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-slate-900">
-            Registro de Ingresos de Espectadores ({entries.length} transacciones)
-          </h3>
-          <span className="text-[11px] text-slate-500">Sincronizado en tiempo real</span>
+        <div className="px-4 sm:px-5 py-3.5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm sm:text-base font-bold text-slate-900">
+              Conteo Consolidado por Tipo de Entrada
+            </h3>
+            <p className="text-[11px] sm:text-xs text-slate-500">
+              Total acumulado según modalidad de boletos y pases de cortesía
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              {totalSpectators} espectadores presentes
+            </span>
+          </div>
         </div>
 
-        {/* Tarjetas Móviles (sm:hidden) */}
-        <div className="sm:hidden divide-y divide-slate-100">
-          {entries.length === 0 ? (
-            <div className="py-8 text-center text-xs text-slate-500">
-              Aún no hay espectadores registrados en este torneo.
-            </div>
-          ) : (
-            entries.slice(0, 30).map((entry) => (
-              <div key={entry.id} className="p-3.5 space-y-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-900">{entry.label}</span>
-                  <span className="font-mono-tabular font-bold text-emerald-700">
-                    S/ {entry.totalAmount.toFixed(2)}
+        {/* Tarjetas Móviles y Cuadrícula (sm:hidden) */}
+        <div className="sm:hidden p-3.5 space-y-3">
+          {tiers.map((tier) => {
+            const tierCount = entries
+              .filter((e) => e.ticketType === tier.type || e.label === tier.label)
+              .reduce((acc, e) => acc + e.quantity, 0);
+            const tierRevenue = entries
+              .filter((e) => e.ticketType === tier.type || e.label === tier.label)
+              .reduce((acc, e) => acc + e.totalAmount, 0);
+            const isGratis = tier.type === 'GRATIS' || tier.price === 0;
+
+            return (
+              <div
+                key={tier.id}
+                className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/50 space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-900"></span>
+                    <span className="font-bold text-slate-900 text-sm">{tier.label}</span>
+                  </div>
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-200/60 text-slate-700 font-semibold">
+                    {tier.qrCode}
                   </span>
                 </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-500">
-                  <span className="font-mono-tabular">{entry.qrCode} · Cant: {entry.quantity}</span>
-                  <span className="font-mono-tabular">{entry.timestamp}</span>
-                </div>
-                <div className="text-[11px]">
-                  {entry.isChild ? (
-                    <span className="text-emerald-700 font-semibold">Niño / Menor</span>
-                  ) : (
-                    <span className="text-slate-600 font-medium">Adulto / General</span>
-                  )}
-                  <span className="text-slate-400"> (S/ {entry.price.toFixed(2)} c/u)</span>
+
+                <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-200/60 text-center">
+                  <div className="bg-white p-2 rounded border border-slate-100">
+                    <span className="block text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Tarifa</span>
+                    <span className="text-xs font-bold text-slate-800">
+                      {isGratis ? 'GRATIS' : `S/ ${tier.price.toFixed(2)}`}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2 rounded border border-slate-100">
+                    <span className="block text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Entradas</span>
+                    <span className="text-base font-bold text-slate-900 font-mono-tabular">
+                      {tierCount}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2 rounded border border-slate-100">
+                    <span className="block text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Total</span>
+                    <span className="text-xs font-bold text-emerald-700 font-mono-tabular">
+                      S/ {tierRevenue.toFixed(2)}
+                    </span>
+                  </div>
                 </div>
               </div>
-            ))
-          )}
+            );
+          })}
+
+          <div className="p-3 bg-slate-900 text-white rounded-lg flex items-center justify-between text-xs font-bold">
+            <span>TOTAL GENERAL RECAUDADO</span>
+            <span className="font-mono-tabular text-sm text-emerald-400">
+              S/ {totalRevenue.toFixed(2)}
+            </span>
+          </div>
         </div>
 
         {/* Tabla Desktop (hidden sm:block) */}
         <div className="hidden sm:block overflow-x-auto w-full">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/70 text-[11px] font-semibold text-slate-500">
-                <th className="py-2.5 px-5">Hora</th>
-                <th className="py-2.5 px-3">Código QR</th>
-                <th className="py-2.5 px-3">Tipo de Boleto</th>
-                <th className="py-2.5 px-3">Categoría</th>
-                <th className="py-2.5 px-3 text-right">Cantidad</th>
-                <th className="py-2.5 px-3 text-right">Tarifa Unit.</th>
-                <th className="py-2.5 px-5 text-right">Total Pagado</th>
+              <tr className="border-b border-slate-200 bg-slate-50/70 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                <th className="py-3 px-5">Tipo de Entrada / Modalidad</th>
+                <th className="py-3 px-4">Código QR</th>
+                <th className="py-3 px-4 text-center">Clasificación</th>
+                <th className="py-3 px-4 text-right">Precio Unitario</th>
+                <th className="py-3 px-4 text-right">Cantidad de Boletos</th>
+                <th className="py-3 px-5 text-right">Total Recaudado</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
-              {entries.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-500">
-                    Aún no hay espectadores registrados en este torneo.
-                  </td>
-                </tr>
-              ) : (
-                entries.map((entry) => (
-                  <tr key={entry.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-2.5 px-5 font-mono-tabular text-slate-500">
-                      {entry.timestamp}
+              {tiers.map((tier) => {
+                const tierCount = entries
+                  .filter((e) => e.ticketType === tier.type || e.label === tier.label)
+                  .reduce((acc, e) => acc + e.quantity, 0);
+                const tierRevenue = entries
+                  .filter((e) => e.ticketType === tier.type || e.label === tier.label)
+                  .reduce((acc, e) => acc + e.totalAmount, 0);
+                const isGratis = tier.type === 'GRATIS' || tier.price === 0;
+
+                return (
+                  <tr key={tier.id} className="hover:bg-slate-50/80 transition-colors">
+                    <td className="py-3 px-5 font-semibold text-slate-900 flex items-center gap-2">
+                      <Ticket className="w-4 h-4 text-slate-500" />
+                      {tier.label}
                     </td>
-                    <td className="py-2.5 px-3 font-mono-tabular font-medium text-slate-800">
-                      {entry.qrCode}
+                    <td className="py-3 px-4 font-mono-tabular text-xs font-medium text-slate-600">
+                      {tier.qrCode}
                     </td>
-                    <td className="py-2.5 px-3 font-medium text-slate-900">
-                      {entry.label}
-                    </td>
-                    <td className="py-2.5 px-3 text-xs font-semibold">
-                      {entry.isChild ? (
-                        <span className="text-emerald-700">Niño / Menor</span>
+                    <td className="py-3 px-4 text-center">
+                      {isGratis ? (
+                        <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                          Cortesía / Gratis
+                        </span>
+                      ) : tier.isChild ? (
+                        <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          Menor / Niño
+                        </span>
                       ) : (
-                        <span className="text-slate-600">Adulto / General</span>
+                        <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                          General
+                        </span>
                       )}
                     </td>
-                    <td className="py-2.5 px-3 text-right font-mono-tabular font-semibold text-slate-900">
-                      {entry.quantity}
+                    <td className="py-3 px-4 text-right font-mono-tabular text-slate-700 font-medium">
+                      {isGratis ? 'S/ 0.00' : `S/ ${tier.price.toFixed(2)}`}
                     </td>
-                    <td className="py-2.5 px-3 text-right font-mono-tabular text-slate-600">
-                      S/ {entry.price.toFixed(2)}
+                    <td className="py-3 px-4 text-right font-mono-tabular font-bold text-slate-900 text-base">
+                      {tierCount}
                     </td>
-                    <td className="py-2.5 px-5 text-right font-mono-tabular font-semibold text-slate-900">
-                      S/ {entry.totalAmount.toFixed(2)}
+                    <td className="py-3 px-5 text-right font-mono-tabular font-bold text-emerald-700">
+                      S/ {tierRevenue.toFixed(2)}
                     </td>
                   </tr>
-                ))
-              )}
+                );
+              })}
             </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-slate-300 bg-slate-100/70 font-bold text-sm text-slate-900">
+                <td colSpan={4} className="py-3 px-5 uppercase tracking-wide">
+                  Totales Generales de Taquilla
+                </td>
+                <td className="py-3 px-4 text-right font-mono-tabular text-base text-slate-900">
+                  {totalSpectators}
+                </td>
+                <td className="py-3 px-5 text-right font-mono-tabular text-base text-emerald-700">
+                  S/ {totalRevenue.toFixed(2)}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>
@@ -606,17 +689,40 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
                 />
               </div>
 
-              <div className="flex items-center gap-2 pt-1">
-                <input
-                  type="checkbox"
-                  id="is-child-box"
-                  checked={newIsChild}
-                  onChange={(e) => setNewIsChild(e.target.checked)}
-                  className="w-4 h-4 rounded text-emerald-600 border-slate-300 focus:ring-emerald-500"
-                />
-                <label htmlFor="is-child-box" className="text-xs font-medium text-slate-700">
-                  Es boleto para niños (contabilizar en estadísticas infantiles)
-                </label>
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="is-child-box"
+                    checked={newIsChild}
+                    onChange={(e) => {
+                      setNewIsChild(e.target.checked);
+                      if (e.target.checked) setNewIsGratis(false);
+                    }}
+                    className="w-4 h-4 rounded text-emerald-600 border-slate-300 focus:ring-emerald-500"
+                  />
+                  <label htmlFor="is-child-box" className="text-xs font-medium text-slate-700">
+                    Es boleto para niños (contabilizar en estadísticas infantiles)
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="is-gratis-box"
+                    checked={newIsGratis}
+                    onChange={(e) => {
+                      setNewIsGratis(e.target.checked);
+                      if (e.target.checked) {
+                        setNewPrice(0);
+                        setNewIsChild(false);
+                      }
+                    }}
+                    className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500"
+                  />
+                  <label htmlFor="is-gratis-box" className="text-xs font-semibold text-blue-900">
+                    Entrada Gratis / Cortesía (Costo S/ 0.00 - Invitados y Prensa)
+                  </label>
+                </div>
               </div>
 
               <div>

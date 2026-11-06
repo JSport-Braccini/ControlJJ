@@ -4,13 +4,14 @@ import {
   Users,
   Ticket,
   CupSoda,
-  QrCode,
   LayoutDashboard,
   LogOut,
   UserCog,
   Settings,
   Camera,
   CheckCircle2,
+  Receipt,
+  FileSpreadsheet,
 } from 'lucide-react';
 import {
   ActiveTab,
@@ -21,20 +22,22 @@ import {
   BeverageProduct,
   AuthUser,
   SystemConfig,
+  ExpenseItem,
 } from './types/championship';
 import { useRealtimeSync } from './hooks/useRealtimeSync';
 import { SummaryDashboard } from './components/SummaryDashboard';
-import { QrScannerPanel } from './components/QrScannerPanel';
 import { PlayersManager } from './components/PlayersManager';
 import { SpectatorsManager } from './components/SpectatorsManager';
 import { BeveragesManager } from './components/BeveragesManager';
+import { ExpensesManager } from './components/ExpensesManager';
+import { GeneralReport } from './components/GeneralReport';
 import { TournamentsManager } from './components/TournamentsManager';
 import { UsersManager } from './components/UsersManager';
 import { SystemSettingsModal } from './components/SystemSettingsModal';
 import { LoginModal } from './components/LoginModal';
 import { CameraQrModal } from './components/CameraQrModal';
 import { ConnectionGuideModal } from './components/ConnectionGuideModal';
-import { INITIAL_AUTH_USERS } from './data/authUsers';
+import { CorporateLogo } from './components/CorporateLogo';
 
 const AUTH_STORAGE_KEY = 'copacontrol_auth_user_v2';
 
@@ -55,18 +58,8 @@ export function App() {
 
   const [showConnectionModal, setShowConnectionModal] = useState(false);
 
-  // Authentication State
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
-    try {
-      const saved = localStorage.getItem(AUTH_STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch {
-      // ignore
-    }
-    return INITIAL_AUTH_USERS[0];
-  });
+  // Authentication State: Acceso directo al login sin sesión pre-cargada para máxima protección
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('resumen');
   const [showConfigModal, setShowConfigModal] = useState(false);
@@ -273,6 +266,35 @@ export function App() {
     });
   };
 
+  // General Expenses Actions (Admin)
+  const handleAddExpense = (expense: ExpenseItem) => {
+    sendAction('ADD_EXPENSE', {
+      tournamentId: activeTournament.id,
+      expense,
+    });
+  };
+
+  const handleUpdateExpense = (expense: ExpenseItem) => {
+    sendAction('UPDATE_EXPENSE', {
+      tournamentId: activeTournament.id,
+      expense,
+    });
+  };
+
+  const handleDeleteExpense = (expenseId: string) => {
+    sendAction('DELETE_EXPENSE', {
+      tournamentId: activeTournament.id,
+      expenseId,
+    });
+  };
+
+  // Reset System to Zero (Admin)
+  const handleResetDataToZero = () => {
+    sendAction('RESET_ALL_DATA_TO_ZERO', {
+      tournamentId: activeTournament.id,
+    });
+  };
+
   // Login Modal si no hay sesión activa
   if (!currentUser) {
     return (
@@ -292,8 +314,8 @@ export function App() {
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-4 w-full">
           {/* Zona 1: Logo Corporativo JJ y Estación de Usuario */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0 min-w-0">
-            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl overflow-hidden bg-white p-0.5 border border-slate-700 shadow-sm shrink-0">
-              <img
+            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl overflow-hidden bg-white p-0.5 border border-slate-700 shadow-sm shrink-0 flex items-center justify-center">
+              <CorporateLogo
                 src={systemConfig.logoUrl}
                 alt="Escudo Corporativo JJ"
                 className="w-full h-full object-cover rounded-lg"
@@ -365,15 +387,27 @@ export function App() {
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab('escaner')}
+                onClick={() => setActiveTab('gastos')}
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  activeTab === 'escaner'
+                  activeTab === 'gastos'
                     ? 'bg-red-600 text-white font-bold'
                     : 'hover:text-white hover:bg-slate-800'
                 }`}
               >
-                <QrCode className="w-4 h-4" />
-                Escáner QR
+                <Receipt className="w-4 h-4" />
+                Gastos
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('reporte')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  activeTab === 'reporte'
+                    ? 'bg-red-600 text-white font-bold'
+                    : 'hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                Reporte General
               </button>
               <button
                 type="button"
@@ -566,10 +600,11 @@ export function App() {
             {(
               [
                 ['resumen', 'Principal', LayoutDashboard],
-                ['escaner', 'Escáner QR', QrCode],
                 ['jugadores', 'Jugadores', Users],
                 ['espectadores', 'Entradas', Ticket],
                 ['bebidas', 'Bebidas', CupSoda],
+                ['gastos', 'Gastos', Receipt],
+                ['reporte', 'Reporte', FileSpreadsheet],
                 ['torneos', 'Torneos', Trophy],
                 ['usuarios', `Usuarios (${users.length})`, UserCog],
               ] as [ActiveTab, string, any][]
@@ -606,30 +641,44 @@ export function App() {
                 spectatorEntries={activeTournamentState.spectatorEntries}
                 beverages={activeTournamentState.beverages}
                 beverageSales={activeTournamentState.beverageSales}
+                expenses={activeTournamentState.expenses || []}
                 lastFeedback={activeTournamentState.scanHistory[0] || null}
                 currentUserRole={currentRole}
                 currentUserName={currentUser.displayName}
                 connectedClientsCount={serverData.connectedClientsCount}
                 onQuickScan={handleProcessQr}
-                onGoToScanner={() => setActiveTab('escaner')}
                 onGoToPlayers={() => setActiveTab('jugadores')}
                 onGoToSpectators={() => setActiveTab('espectadores')}
                 onGoToBeverages={() => setActiveTab('bebidas')}
+                onGoToExpenses={() => setActiveTab('gastos')}
+                onGoToReport={() => setActiveTab('reporte')}
                 onGoToTournaments={() => setActiveTab('torneos')}
+                onResetAllData={handleResetDataToZero}
               />
             )}
 
-            {activeTab === 'escaner' && (
-              <QrScannerPanel
+            {activeTab === 'gastos' && (
+              <ExpensesManager
                 tournamentId={activeTournament.id}
                 tournamentName={activeTournament.name}
-                currentRole={currentRole}
+                expenses={activeTournamentState.expenses || []}
+                currentUserRole={currentRole}
+                currentUserName={currentUser.displayName}
+                onAddExpense={handleAddExpense}
+                onUpdateExpense={handleUpdateExpense}
+                onDeleteExpense={handleDeleteExpense}
+              />
+            )}
+
+            {activeTab === 'reporte' && (
+              <GeneralReport
+                tournament={activeTournament}
                 players={activeTournamentState.players}
                 spectatorTiers={activeTournamentState.spectatorTiers}
+                spectatorEntries={activeTournamentState.spectatorEntries}
                 beverages={activeTournamentState.beverages}
-                lastFeedback={activeTournamentState.scanHistory[0] || null}
-                scanHistory={activeTournamentState.scanHistory}
-                onProcessQr={handleProcessQr}
+                beverageSales={activeTournamentState.beverageSales}
+                expenses={activeTournamentState.expenses || []}
               />
             )}
 

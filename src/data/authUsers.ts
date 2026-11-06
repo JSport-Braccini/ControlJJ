@@ -1,9 +1,9 @@
-import { AuthUser, SystemConfig } from '../types/championship';
+import { AuthUser, SystemConfig } from '../types/championship.js';
 
 export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
   systemName: 'JJ Executive Sports',
   tagline: 'Plataforma Corporativa de Control de Asistencia, Aforo y Ventas QR',
-  logoUrl: '/src/assets/images/jj_corp_shield_logo_1793909841397.jpg',
+  logoUrl: '/images/logo.jpg',
   primaryColor: '#0A192F', // Navy Blue
   accentColor: '#DC2626',  // Red
 };

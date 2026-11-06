@@ -114,6 +114,7 @@ export function applyAppAction(
         spectatorEntries: [...tState.spectatorEntries],
         beverages: [...tState.beverages],
         beverageSales: [...tState.beverageSales],
+        expenses: [...(tState.expenses || [])],
         scanHistory: [...tState.scanHistory],
       };
       nextState.statesByTournament[tournamentId] = state;
@@ -383,6 +384,68 @@ export function applyAppAction(
         nextState.statesByTournament[tournamentId] = {
           ...tState,
           beverages: tState.beverages.filter((b) => b.id !== beverageId),
+        };
+      }
+      return nextState;
+    }
+
+    // CRUD EXPENSES
+    case 'ADD_EXPENSE': {
+      const { tournamentId, expense } = payload;
+      const tState = nextState.statesByTournament[tournamentId];
+      if (tState) {
+        nextState.statesByTournament[tournamentId] = {
+          ...tState,
+          expenses: [expense, ...(tState.expenses || [])],
+        };
+      }
+      return nextState;
+    }
+
+    case 'UPDATE_EXPENSE': {
+      const { tournamentId, expense } = payload;
+      const tState = nextState.statesByTournament[tournamentId];
+      if (tState && tState.expenses) {
+        nextState.statesByTournament[tournamentId] = {
+          ...tState,
+          expenses: tState.expenses.map((e) => (e.id === expense.id ? { ...e, ...expense } : e)),
+        };
+      }
+      return nextState;
+    }
+
+    case 'DELETE_EXPENSE': {
+      const { tournamentId, expenseId } = payload;
+      const tState = nextState.statesByTournament[tournamentId];
+      if (tState && tState.expenses) {
+        nextState.statesByTournament[tournamentId] = {
+          ...tState,
+          expenses: tState.expenses.filter((e) => e.id !== expenseId),
+        };
+      }
+      return nextState;
+    }
+
+    case 'RESET_ALL_DATA_TO_ZERO': {
+      const { tournamentId } = payload;
+      const tState = nextState.statesByTournament[tournamentId];
+      if (tState) {
+        nextState.statesByTournament[tournamentId] = {
+          ...tState,
+          players: tState.players.map((p) => ({
+            ...p,
+            checkedIn: false,
+            checkInTime: undefined,
+            duplicateAttempts: 0,
+          })),
+          spectatorEntries: [],
+          beverages: tState.beverages.map((b) => ({
+            ...b,
+            soldCount: 0,
+          })),
+          beverageSales: [],
+          expenses: [],
+          scanHistory: [],
         };
       }
       return nextState;

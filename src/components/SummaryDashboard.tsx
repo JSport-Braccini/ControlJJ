@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   Download,
-  QrCode,
   Users,
   Ticket,
   CupSoda,
@@ -10,15 +9,18 @@ import {
   ShieldAlert,
   Calendar,
   MapPin,
-  Camera,
   CheckCircle2,
   AlertCircle,
   TrendingUp,
-  UserCheck,
+  TrendingDown,
   ArrowRight,
   ShieldCheck,
-  ScanLine,
-  Lock,
+  Receipt,
+  FileSpreadsheet,
+  RotateCcw,
+  X,
+  AlertTriangle,
+  UserCheck,
 } from 'lucide-react';
 import {
   Tournament,
@@ -27,10 +29,10 @@ import {
   SpectatorEntry,
   BeverageProduct,
   BeverageSale,
+  ExpenseItem,
   ScanFeedback,
   UserRole,
 } from '../types/championship';
-import { CameraQrModal } from './CameraQrModal';
 
 interface SummaryDashboardProps {
   tournament: Tournament;
@@ -39,16 +41,19 @@ interface SummaryDashboardProps {
   spectatorEntries: SpectatorEntry[];
   beverages: BeverageProduct[];
   beverageSales: BeverageSale[];
-  lastFeedback: ScanFeedback | null;
+  expenses?: ExpenseItem[];
+  lastFeedback?: ScanFeedback | null;
   currentUserRole: UserRole;
   currentUserName: string;
   connectedClientsCount?: number;
-  onQuickScan: (qrCode: string, quantity?: number) => void;
-  onGoToScanner: () => void;
+  onQuickScan?: (qrCode: string, quantity?: number) => void;
   onGoToPlayers: () => void;
   onGoToSpectators: () => void;
   onGoToBeverages: () => void;
+  onGoToExpenses: () => void;
+  onGoToReport: () => void;
   onGoToTournaments: () => void;
+  onResetAllData?: () => void;
 }
 
 export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
@@ -58,20 +63,21 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
   spectatorEntries,
   beverages,
   beverageSales,
+  expenses = [],
   lastFeedback,
   currentUserRole,
   currentUserName,
   connectedClientsCount = 1,
-  onQuickScan,
-  onGoToScanner,
   onGoToPlayers,
   onGoToSpectators,
   onGoToBeverages,
+  onGoToExpenses,
+  onGoToReport,
   onGoToTournaments,
+  onResetAllData,
 }) => {
-  const [directQrCode, setDirectQrCode] = useState('');
-  const [directQty, setDirectQty] = useState<number>(1);
-  const [showDirectCamera, setShowDirectCamera] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [confirmPhrase, setConfirmPhrase] = useState('');
 
   const isAdmin = currentUserRole === 'ADMIN';
   const isPlayersUser = currentUserRole === 'CONTROL_JUGADORES';
@@ -127,15 +133,9 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
     0
   );
 
+  const totalExpenses = (expenses || []).reduce((acc, e) => acc + e.amount, 0);
   const grandTotalRevenue = totalTicketRevenue + totalBeverageRevenue;
-
-  const handleDirectSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = directQrCode.trim().toUpperCase();
-    if (!clean) return;
-    onQuickScan(clean, directQty);
-    setDirectQrCode('');
-  };
+  const netProfit = grandTotalRevenue - totalExpenses;
 
   const handleExportCsv = () => {
     const lines: string[] = [
@@ -143,10 +143,12 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
       `Sede: ${tournament.venue} | Fecha: ${tournament.date} | Edicion: ${tournament.edition}`,
       `Generado: ${new Date().toLocaleString('es-PE')}`,
       '',
-      'RESUMEN FINANCIERO Y RECAUDACION',
-      `Total Recaudado en Boletos (S/),${totalTicketRevenue.toFixed(2)}`,
-      `Total Recaudado en Bebidas (S/),${totalBeverageRevenue.toFixed(2)}`,
-      `Gran Total Consolidado (S/),${grandTotalRevenue.toFixed(2)}`,
+      'RESUMEN FINANCIERO Y RESULTADO GENERAL',
+      `Ingresos por Taquilla / Boletos (S/),${totalTicketRevenue.toFixed(2)}`,
+      `Ingresos por Venta de Bebidas (S/),${totalBeverageRevenue.toFixed(2)}`,
+      `Ingresos Brutos Totales (S/),${grandTotalRevenue.toFixed(2)}`,
+      `Gastos Generales Operativos (S/),${totalExpenses.toFixed(2)}`,
+      `RESULTADO NETO / UTILIDAD (S/),${netProfit.toFixed(2)}`,
       '',
       'CONTROL DE ESPECTADORES Y BOLETERIA',
       'Tipo de Entrada,Tarifa Unitaria (S/),Personas Ingresadas,Subtotal (S/)',
@@ -165,6 +167,13 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
           `"${b.name}","${b.presentation}",${b.price.toFixed(2)},${b.soldCount},${b.stock},${(
             b.soldCount * b.price
           ).toFixed(2)}`
+      ),
+      '',
+      'GASTOS GENERALES REGISTRADOS',
+      'Fecha,Categoria,Concepto,Monto (S/),Notas/Referencia',
+      ...(expenses || []).map(
+        (exp) =>
+          `"${exp.date}","${exp.category}","${exp.concept}",${exp.amount.toFixed(2)},"${exp.notes || '-'}"`
       ),
       '',
       'CONTROL DE ASISTENCIA DE JUGADORES',
@@ -192,174 +201,98 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* 1. MÓDULO DE ESCANEO DIRECTO UNIFICADO (ARRIBA DEL MENÚ) */}
-      <div className="bg-[#0A192F] text-white border-2 border-red-600 rounded-2xl p-4 sm:p-5 shadow-lg relative overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
-          <div className="space-y-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs font-semibold">
-              <span className="bg-red-600 text-white px-2 py-0.5 rounded text-[10px] tracking-wider uppercase font-mono">
-                Auto-Distribución Inteligente QR
-              </span>
-              <span className="text-slate-400">·</span>
-              <span className="text-slate-300 text-[11px] sm:text-xs">Estación: <strong>{currentUserName}</strong></span>
-            </div>
-            <h2 className="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2">
-              <ScanLine className="w-5 h-5 text-red-500 animate-pulse shrink-0" />
-              <span>Escanear QR Directo</span>
-            </h2>
-            <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
-              Escanea con la cámara en vivo o lector láser: el sistema reconoce al instante si es <strong>Jugador</strong> (con control de duplicidad), <strong>Entrada</strong> (contando niños/adultos) o <strong>Bebida</strong> (descontando stock y sumando venta).
-            </p>
+      {/* Feedback del último escaneo (notificación discreta si hubo escaneo en el sistema) */}
+      {lastFeedback && (
+        <div
+          className={`p-3 rounded-xl border flex items-start gap-2.5 text-xs ${
+            lastFeedback.status === 'duplicate'
+              ? 'bg-red-950/80 border-red-500 text-red-100'
+              : lastFeedback.status === 'success'
+              ? 'bg-emerald-950/80 border-emerald-500 text-emerald-100'
+              : 'bg-amber-950/80 border-amber-500 text-amber-100'
+          }`}
+        >
+          <div className="shrink-0 mt-0.5">
+            {lastFeedback.status === 'duplicate' ? (
+              <ShieldAlert className="w-4 h-4 text-red-400" />
+            ) : lastFeedback.status === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-amber-400" />
+            )}
           </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Botón de Cámara en Vivo Directo (igual que en los demás usuarios) */}
-            <button
-              type="button"
-              onClick={() => setShowDirectCamera(true)}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md min-h-[42px] shrink-0 active:scale-95"
-              title="Abrir cámara del dispositivo para escanear QR"
-            >
-              <Camera className="w-4 h-4 text-white" />
-              <span>Escanear con Cámara</span>
-            </button>
+          <div className="flex-1 min-w-0">
+            <span className="font-bold tracking-tight">{lastFeedback.title}</span> — {lastFeedback.message}
           </div>
-        </div>
-
-        {/* Input de Escaneo Directo */}
-        <form onSubmit={handleDirectSubmit} className="mt-3.5 pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
-          <div className="relative flex-1">
-            <QrCode className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={directQrCode}
-              onChange={(e) => setDirectQrCode(e.target.value)}
-              placeholder="Escanea con láser o ingresa código (ej: JUG-001, ESP-ADULTO, BEB-VOLT)..."
-              className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm font-mono-tabular bg-slate-900/90 text-white placeholder:text-slate-500 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 min-h-[40px]"
-            />
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="flex items-center gap-1 bg-slate-900 px-2 py-1.5 rounded-xl border border-slate-700 text-xs min-h-[40px]">
-              <span className="text-slate-400 text-[11px]">Cant:</span>
-              <input
-                type="number"
-                min={1}
-                max={50}
-                value={directQty}
-                onChange={(e) => setDirectQty(Math.max(1, Number(e.target.value) || 1))}
-                className="w-10 text-center font-mono-tabular bg-transparent text-white font-bold focus:outline-none text-xs sm:text-sm"
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="flex-1 sm:flex-none px-4 py-2 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shadow-md flex items-center justify-center gap-1.5 min-h-[40px]"
-            >
-              Procesar QR
-            </button>
-          </div>
-        </form>
-
-        {/* Acceso rápido a pruebas directas */}
-        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-300">
-          <span className="text-slate-400 text-[10px] sm:text-[11px]">Pruebas rápidas:</span>
-          <button
-            type="button"
-            onClick={() => onQuickScan('JUG-001', 1)}
-            className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 border border-slate-700 cursor-pointer text-[10px] sm:text-[11px]"
-          >
-            Jugador JUG-001
-          </button>
-          <button
-            type="button"
-            onClick={() => onQuickScan('ESP-ADULTO', directQty)}
-            className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 border border-slate-700 cursor-pointer text-[10px] sm:text-[11px]"
-          >
-            Boleto Adulto
-          </button>
-          <button
-            type="button"
-            onClick={() => onQuickScan('ESP-NINO', directQty)}
-            className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 border border-slate-700 cursor-pointer text-[10px] sm:text-[11px]"
-          >
-            Boleto Niño
-          </button>
-          <button
-            type="button"
-            onClick={() => onQuickScan('BEB-VOLT', directQty)}
-            className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 border border-slate-700 cursor-pointer text-[10px] sm:text-[11px]"
-          >
-            Bebida Volt
-          </button>
-          <button
-            type="button"
-            onClick={() => onQuickScan('BEB-SPORADE', directQty)}
-            className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 border border-slate-700 cursor-pointer text-[10px] sm:text-[11px]"
-          >
-            Bebida Sporade
-          </button>
-        </div>
-
-        {/* Feedback del último escaneo directo */}
-        {lastFeedback && (
-          <div
-            className={`mt-3.5 p-3 rounded-xl border flex items-start gap-2.5 text-xs ${
-              lastFeedback.status === 'duplicate'
-                ? 'bg-red-950/80 border-red-500 text-red-100'
-                : lastFeedback.status === 'success'
-                ? 'bg-emerald-950/80 border-emerald-500 text-emerald-100'
-                : 'bg-amber-950/80 border-amber-500 text-amber-100'
-            }`}
-          >
-            <div className="shrink-0 mt-0.5">
-              {lastFeedback.status === 'duplicate' ? (
-                <ShieldAlert className="w-4 h-4 text-red-400" />
-              ) : lastFeedback.status === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              ) : (
-                <AlertCircle className="w-4 h-4 text-amber-400" />
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <span className="font-bold tracking-tight">{lastFeedback.title}</span> — {lastFeedback.message}
-            </div>
-            <span className="text-[10px] font-mono-tabular opacity-75 shrink-0">
-              {lastFeedback.timestamp}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* 2. MENÚ PRINCIPAL CON ÍCONOS PARA INGRESAR DIRECTAMENTE */}
-      <div>
-        <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-          <h2 className="text-lg font-bold tracking-tight text-slate-900 font-display">
-            Menú de Módulos del Sistema
-          </h2>
-          <span className="text-xs text-slate-500">
-            Haz clic en cualquier estación para gestionar
+          <span className="text-[10px] font-mono-tabular opacity-75 shrink-0">
+            {lastFeedback.timestamp}
           </span>
         </div>
+      )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4 mt-3">
+      {/* MENÚ PRINCIPAL CON ÍCONOS PARA INGRESAR DIRECTAMENTE */}
+      <div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200/90">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse"></span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                Panel de Administración General
+              </span>
+            </div>
+            <h2 className="text-xl font-bold tracking-tight text-slate-900 font-display mt-0.5">
+              Estaciones Operativas del Torneo
+            </h2>
+            <p className="text-xs text-slate-500">
+              Acceso rápido a las estaciones de control, finanzas y reportes consolidados
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {isAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleExportCsv}
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl cursor-pointer flex items-center gap-1.5 shadow-2xs hover:shadow-xs transition-all"
+                >
+                  <Download className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="hidden sm:inline">Exportar CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmPhrase('');
+                    setShowResetModal(true);
+                  }}
+                  className="px-3.5 py-2 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl cursor-pointer flex items-center gap-1.5 shadow-2xs hover:shadow-xs transition-all"
+                  title="Restablecer todos los contadores del sistema a cero"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-red-600" />
+                  <span>Restablecer a Cero</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3.5 mt-3.5">
           {/* Módulo Jugadores */}
           <button
             type="button"
             onClick={onGoToPlayers}
-            className="bg-white hover:bg-slate-50 border border-slate-200 hover:border-blue-600 rounded-xl p-3 sm:p-4 text-left transition-all shadow-xs group cursor-pointer flex flex-col justify-between"
+            className="bg-white hover:bg-slate-50/80 border border-slate-200/90 hover:border-blue-500/80 rounded-2xl p-3.5 sm:p-4 text-left transition-all duration-200 shadow-2xs hover:shadow-md hover:-translate-y-0.5 group cursor-pointer flex flex-col justify-between"
           >
             <div className="flex items-center justify-between">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-blue-50 text-blue-800 flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-blue-50 text-blue-800 border border-blue-200/60 flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
                 <Users className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-300 group-hover:text-blue-700 transition-colors" />
+              <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-300 group-hover:text-blue-700 group-hover:translate-x-0.5 transition-all" />
             </div>
-            <div className="mt-2.5 sm:mt-3">
+            <div className="mt-3">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-blue-900 truncate">
                 Control Jugadores
               </h3>
-              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 truncate">
+              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 truncate font-medium">
                 {checkedInPlayers} de {totalPlayers} presentes
               </p>
             </div>
@@ -369,19 +302,19 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
           <button
             type="button"
             onClick={onGoToSpectators}
-            className="bg-white hover:bg-slate-50 border border-slate-200 hover:border-emerald-600 rounded-xl p-3 sm:p-4 text-left transition-all shadow-xs group cursor-pointer flex flex-col justify-between"
+            className="bg-white hover:bg-slate-50/80 border border-slate-200/90 hover:border-emerald-500/80 rounded-2xl p-3.5 sm:p-4 text-left transition-all duration-200 shadow-2xs hover:shadow-md hover:-translate-y-0.5 group cursor-pointer flex flex-col justify-between"
           >
             <div className="flex items-center justify-between">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200/60 flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
                 <Ticket className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-300 group-hover:text-emerald-700 transition-colors" />
+              <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-300 group-hover:text-emerald-700 group-hover:translate-x-0.5 transition-all" />
             </div>
-            <div className="mt-2.5 sm:mt-3">
+            <div className="mt-3">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-emerald-900 truncate">
                 Control Espectadores
               </h3>
-              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 font-mono-tabular truncate">
+              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 font-mono-tabular truncate font-medium">
                 {totalSpectatorsCount} boletos (S/ {totalTicketRevenue.toFixed(0)})
               </p>
             </div>
@@ -391,20 +324,64 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
           <button
             type="button"
             onClick={onGoToBeverages}
-            className="bg-white hover:bg-slate-50 border border-slate-200 hover:border-amber-600 rounded-xl p-3 sm:p-4 text-left transition-all shadow-xs group cursor-pointer flex flex-col justify-between"
+            className="bg-white hover:bg-slate-50/80 border border-slate-200/90 hover:border-amber-500/80 rounded-2xl p-3.5 sm:p-4 text-left transition-all duration-200 shadow-2xs hover:shadow-md hover:-translate-y-0.5 group cursor-pointer flex flex-col justify-between"
           >
             <div className="flex items-center justify-between">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-amber-50 text-amber-800 flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-amber-50 text-amber-800 border border-amber-200/60 flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
                 <CupSoda className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-300 group-hover:text-amber-700 transition-colors" />
+              <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-300 group-hover:text-amber-700 group-hover:translate-x-0.5 transition-all" />
             </div>
-            <div className="mt-2.5 sm:mt-3">
+            <div className="mt-3">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-amber-900 truncate">
                 Control Bebidas
               </h3>
-              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 font-mono-tabular truncate">
+              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 font-mono-tabular truncate font-medium">
                 {totalBeverageUnits} ventas (S/ {totalBeverageRevenue.toFixed(0)})
+              </p>
+            </div>
+          </button>
+
+          {/* Módulo Gastos Generales */}
+          <button
+            type="button"
+            onClick={onGoToExpenses}
+            className="bg-white hover:bg-slate-50/80 border border-slate-200/90 hover:border-rose-500/80 rounded-2xl p-3.5 sm:p-4 text-left transition-all duration-200 shadow-2xs hover:shadow-md hover:-translate-y-0.5 group cursor-pointer flex flex-col justify-between"
+          >
+            <div className="flex items-center justify-between">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-rose-50 text-rose-700 border border-rose-200/60 flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
+                <Receipt className="w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-300 group-hover:text-rose-700 group-hover:translate-x-0.5 transition-all" />
+            </div>
+            <div className="mt-3">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-rose-900 truncate">
+                Gastos Generales
+              </h3>
+              <p className="text-[10px] sm:text-xs text-rose-600 mt-0.5 font-mono-tabular font-semibold truncate">
+                S/ {totalExpenses.toFixed(0)} ({expenses.length} reg.)
+              </p>
+            </div>
+          </button>
+
+          {/* Módulo Reporte General */}
+          <button
+            type="button"
+            onClick={onGoToReport}
+            className="bg-white hover:bg-slate-50/80 border border-slate-200/90 hover:border-indigo-500/80 rounded-2xl p-3.5 sm:p-4 text-left transition-all duration-200 shadow-2xs hover:shadow-md hover:-translate-y-0.5 group cursor-pointer flex flex-col justify-between"
+          >
+            <div className="flex items-center justify-between">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200/60 flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
+                <FileSpreadsheet className="w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-300 group-hover:text-indigo-700 group-hover:translate-x-0.5 transition-all" />
+            </div>
+            <div className="mt-3">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-indigo-900 truncate">
+                Reporte General
+              </h3>
+              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 font-mono-tabular truncate font-medium">
+                Balance & Utilidad
               </p>
             </div>
           </button>
@@ -413,19 +390,19 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
           <button
             type="button"
             onClick={onGoToTournaments}
-            className="bg-white hover:bg-slate-50 border border-slate-200 hover:border-red-600 rounded-xl p-3 sm:p-4 text-left transition-all shadow-xs group cursor-pointer flex flex-col justify-between"
+            className="bg-white hover:bg-slate-50/80 border border-slate-200/90 hover:border-red-500/80 rounded-2xl p-3.5 sm:p-4 text-left transition-all duration-200 shadow-2xs hover:shadow-md hover:-translate-y-0.5 group cursor-pointer flex flex-col justify-between"
           >
             <div className="flex items-center justify-between">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-red-50 text-red-700 flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-red-50 text-red-700 border border-red-200/60 flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
                 <Trophy className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-300 group-hover:text-red-700 transition-colors" />
+              <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-300 group-hover:text-red-700 group-hover:translate-x-0.5 transition-all" />
             </div>
-            <div className="mt-2.5 sm:mt-3">
+            <div className="mt-3">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-red-900 truncate">
-                Gestión de Torneos
+                Gestión Torneos
               </h3>
-              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 truncate">
+              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 truncate font-medium">
                 {tournament.name}
               </p>
             </div>
@@ -433,87 +410,106 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
         </div>
       </div>
 
-      {/* 3. VISUALIZACIÓN DE TOTALES SEGÚN EL ROL DEL USUARIO */}
+      {/* 2. VISUALIZACIÓN DE TOTALES SEGÚN EL ROL DEL USUARIO */}
       {/* ========================================================================= */}
 
       {/* CASO A: USUARIO ADMINISTRADOR -> VE TODOS LOS TOTALES DETALLADOS */}
       {isAdmin && (
         <div className="space-y-4 sm:space-y-6">
-          <div className="flex items-center justify-between pb-1">
-            <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-500 font-mono">
-              Consolidado General Financiero y Operativo (Exclusivo Administrador)
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pb-1 border-b border-slate-200/70">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-700 font-mono flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-slate-900"></span>
+              Balance Financiero y Operativo Oficial
+            </span>
+            <span className="text-[11px] text-slate-500 font-mono">
+              JJ Executive Sports · Sincronizado en Vivo
             </span>
           </div>
 
-          {/* KPI Strip 4 Columnas (2x2 en móvil para visualización ejecutiva compacta sin barras de scroll) */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
-            <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-5 shadow-xs flex flex-col justify-between min-h-[110px] sm:min-h-[130px]">
+          {/* KPI Strip 4 Columnas (Utilidad Neta, Ingresos, Gastos, Jugadores) */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            {/* 1. Utilidad Neta / Resultado General */}
+            <div className={`border-2 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col justify-between min-h-[120px] sm:min-h-[140px] transition-all ${
+              netProfit >= 0
+                ? 'bg-gradient-to-br from-emerald-50/90 to-white border-emerald-300/80 shadow-emerald-50'
+                : 'bg-gradient-to-br from-red-50/90 to-white border-red-300/80 shadow-red-50'
+            }`}>
               <div>
-                <div className="text-[11px] sm:text-xs font-medium text-slate-500 flex items-center justify-between">
-                  <span className="truncate">Gran Total</span>
-                  <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 shrink-0" />
+                <div className="text-[11px] sm:text-xs font-bold uppercase tracking-wider flex items-center justify-between text-slate-600">
+                  <span className="truncate">Resultado Neto (Utilidad)</span>
+                  {netProfit >= 0 ? (
+                    <TrendingUp className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <TrendingDown className="w-4 h-4 text-red-600 shrink-0" />
+                  )}
                 </div>
-                <div className="mt-1 sm:mt-2 text-base sm:text-2xl font-bold font-mono-tabular text-slate-900 truncate">
+                <div className={`mt-1.5 sm:mt-2 text-xl sm:text-3xl font-extrabold font-mono-tabular tracking-tight truncate ${
+                  netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'
+                }`}>
+                  S/ {netProfit.toFixed(2)}
+                </div>
+              </div>
+              <div className="mt-2.5 pt-2 border-t border-slate-200/60 text-[11px] text-slate-600 font-mono-tabular flex items-center justify-between truncate">
+                <span className="font-semibold">{netProfit >= 0 ? 'Balance Favorable' : 'Déficit Operativo'}</span>
+                <span className="text-slate-400">Neto</span>
+              </div>
+            </div>
+
+            {/* 2. Ingresos Brutos */}
+            <div className="bg-white border border-slate-200/90 hover:border-slate-300 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col justify-between min-h-[120px] sm:min-h-[140px] transition-all">
+              <div>
+                <div className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center justify-between">
+                  <span className="truncate">Ingresos Brutos</span>
+                  <DollarSign className="w-4 h-4 text-emerald-600 shrink-0" />
+                </div>
+                <div className="mt-1.5 sm:mt-2 text-xl sm:text-3xl font-extrabold font-mono-tabular text-slate-900 tracking-tight truncate">
                   S/ {grandTotalRevenue.toFixed(2)}
                 </div>
               </div>
-              <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] sm:text-xs text-slate-500 font-mono-tabular truncate">
-                Boletos + Bebidas
+              <div className="mt-2.5 pt-2 border-t border-slate-100 text-[11px] text-slate-600 font-mono-tabular truncate">
+                Taquilla S/ {totalTicketRevenue.toFixed(0)} · Bebidas S/ {totalBeverageRevenue.toFixed(0)}
               </div>
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-5 shadow-xs flex flex-col justify-between min-h-[110px] sm:min-h-[130px]">
+            {/* 3. Gastos Generales */}
+            <div className="bg-white border border-slate-200/90 hover:border-slate-300 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col justify-between min-h-[120px] sm:min-h-[140px] transition-all">
               <div>
-                <div className="text-[11px] sm:text-xs font-medium text-slate-500 flex items-center justify-between">
-                  <span className="truncate">Ventas Boletos</span>
-                  <Ticket className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 shrink-0" />
+                <div className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center justify-between">
+                  <span className="truncate">Gastos Operativos</span>
+                  <Receipt className="w-4 h-4 text-rose-600 shrink-0" />
                 </div>
-                <div className="mt-1 sm:mt-2 text-base sm:text-2xl font-bold font-mono-tabular text-slate-900 truncate">
-                  S/ {totalTicketRevenue.toFixed(2)}
+                <div className="mt-1.5 sm:mt-2 text-xl sm:text-3xl font-extrabold font-mono-tabular text-rose-700 tracking-tight truncate">
+                  S/ {totalExpenses.toFixed(2)}
                 </div>
               </div>
-              <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] sm:text-xs text-slate-600 font-mono-tabular truncate">
-                {totalSpectatorsCount} asistentes ({totalChildrenCount} niños)
+              <div className="mt-2.5 pt-2 border-t border-slate-100 text-[11px] text-slate-600 font-mono-tabular truncate">
+                {expenses.length} egresos contabilizados
               </div>
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-5 shadow-xs flex flex-col justify-between min-h-[110px] sm:min-h-[130px]">
+            {/* 4. Jugadores y Asistencia */}
+            <div className="bg-white border border-slate-200/90 hover:border-slate-300 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col justify-between min-h-[120px] sm:min-h-[140px] transition-all">
               <div>
-                <div className="text-[11px] sm:text-xs font-medium text-slate-500 flex items-center justify-between">
-                  <span className="truncate">Ventas Bebidas</span>
-                  <CupSoda className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 shrink-0" />
+                <div className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center justify-between">
+                  <span className="truncate">Asistencia Jugadores</span>
+                  <Users className="w-4 h-4 text-blue-600 shrink-0" />
                 </div>
-                <div className="mt-1 sm:mt-2 text-base sm:text-2xl font-bold font-mono-tabular text-slate-900 truncate">
-                  S/ {totalBeverageRevenue.toFixed(2)}
-                </div>
-              </div>
-              <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] sm:text-xs text-slate-600 font-mono-tabular truncate">
-                {totalBeverageUnits} unidades QR
-              </div>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-5 shadow-xs flex flex-col justify-between min-h-[110px] sm:min-h-[130px]">
-              <div>
-                <div className="text-[11px] sm:text-xs font-medium text-slate-500 flex items-center justify-between">
-                  <span className="truncate">Jugadores</span>
-                  <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 shrink-0" />
-                </div>
-                <div className="mt-1 sm:mt-2 text-base sm:text-2xl font-bold font-mono-tabular text-slate-900 truncate">
+                <div className="mt-1.5 sm:mt-2 text-xl sm:text-3xl font-extrabold font-mono-tabular text-slate-900 tracking-tight truncate">
                   {checkedInPlayers}/{totalPlayers}{' '}
                   <span className="text-xs sm:text-sm font-semibold text-emerald-700">
                     ({attendancePct}%)
                   </span>
                 </div>
               </div>
-              <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] sm:text-xs font-mono-tabular flex items-center justify-between truncate">
+              <div className="mt-2.5 pt-2 border-t border-slate-100 text-[11px] font-mono-tabular flex items-center justify-between truncate">
                 <span className="text-slate-500 truncate">{pendingPlayers} pend.</span>
                 {totalDuplicateAttempts > 0 ? (
-                  <span className="text-red-600 font-semibold flex items-center gap-0.5 shrink-0">
-                    <ShieldAlert className="w-3 h-3" />
+                  <span className="text-red-600 font-bold flex items-center gap-0.5 shrink-0">
+                    <ShieldAlert className="w-3.5 h-3.5" />
                     {totalDuplicateAttempts} dup
                   </span>
                 ) : (
-                  <span className="text-slate-400 shrink-0">0 dup</span>
+                  <span className="text-slate-400 shrink-0">{totalSpectatorsCount} espect.</span>
                 )}
               </div>
             </div>
@@ -904,17 +900,84 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
         </div>
       )}
 
-      {/* Modal de Escaneo con Cámara Directo para Administrador */}
-      <CameraQrModal
-        isOpen={showDirectCamera}
-        onClose={() => setShowDirectCamera(false)}
-        onScan={(code) => {
-          onQuickScan(code, directQty);
-        }}
-        title="Escáner QR — Modo Administrador"
-        subtitle="Auto-distribución: reconoce Jugadores, Boletos y Bebidas en vivo"
-        scanCategory="GENERAL"
-      />
+      {/* Modal de Confirmación: Restablecer Sistema a Cero */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 space-y-4 border border-slate-200 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5 text-red-600">
+                <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Restablecer Sistema a CERO
+                  </h3>
+                  <p className="text-xs text-red-600 font-semibold">
+                    Acción irreversible para torneos en curso
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="text-xs text-slate-600 space-y-2 bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
+              <p className="font-semibold text-slate-800">
+                Al confirmar, se ejecutarán los siguientes reinicios:
+              </p>
+              <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                <li><strong>Jugadores:</strong> Asistencias reiniciadas a Pendiente y duplicados a 0.</li>
+                <li><strong>Espectadores:</strong> Historial de boletos y conteos a 0.</li>
+                <li><strong>Bebidas:</strong> Unidades vendidas a 0 y ventas reiniciadas.</li>
+                <li><strong>Gastos:</strong> Lista de gastos operativos reiniciada a 0.</li>
+              </ul>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-700">
+                Para confirmar, escribe la palabra <span className="font-mono text-red-600 font-bold">CONFIRMAR</span>:
+              </label>
+              <input
+                type="text"
+                value={confirmPhrase}
+                onChange={(e) => setConfirmPhrase(e.target.value)}
+                placeholder="Escribe CONFIRMAR"
+                className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={confirmPhrase.trim().toUpperCase() !== 'CONFIRMAR'}
+                onClick={() => {
+                  if (onResetAllData) {
+                    onResetAllData();
+                  }
+                  setShowResetModal(false);
+                }}
+                className="px-4 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg cursor-pointer shadow-xs flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Restablecer Todo a Cero</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

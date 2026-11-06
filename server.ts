@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import {
   Tournament,
@@ -463,6 +464,59 @@ function handleClientAction(
       break;
     }
 
+    case 'ADD_EXPENSE': {
+      const { tournamentId, expense } = payload;
+      const state = serverData.statesByTournament[tournamentId];
+      if (state) {
+        state.expenses = [expense, ...(state.expenses || [])];
+        broadcastFullState();
+      }
+      break;
+    }
+
+    case 'UPDATE_EXPENSE': {
+      const { tournamentId, expense } = payload;
+      const state = serverData.statesByTournament[tournamentId];
+      if (state && state.expenses) {
+        state.expenses = state.expenses.map((e) => (e.id === expense.id ? { ...e, ...expense } : e));
+        broadcastFullState();
+      }
+      break;
+    }
+
+    case 'DELETE_EXPENSE': {
+      const { tournamentId, expenseId } = payload;
+      const state = serverData.statesByTournament[tournamentId];
+      if (state && state.expenses) {
+        state.expenses = state.expenses.filter((e) => e.id !== expenseId);
+        broadcastFullState();
+      }
+      break;
+    }
+
+    case 'RESET_ALL_DATA_TO_ZERO': {
+      const { tournamentId } = payload;
+      const state = serverData.statesByTournament[tournamentId];
+      if (state) {
+        state.players = state.players.map((p) => ({
+          ...p,
+          checkedIn: false,
+          checkInTime: undefined,
+          duplicateAttempts: 0,
+        }));
+        state.spectatorEntries = [];
+        state.beverages = state.beverages.map((b) => ({
+          ...b,
+          soldCount: 0,
+        }));
+        state.beverageSales = [];
+        state.expenses = [];
+        state.scanHistory = [];
+        broadcastFullState();
+      }
+      break;
+    }
+
     case 'RESET_TOURNAMENT_DATA': {
       const { tournamentId } = payload;
       const t = serverData.tournaments.find((tour) => tour.id === tournamentId);
@@ -520,6 +574,20 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
+
+    app.use('*', async (req, res, next) => {
+      const url = req.originalUrl;
+      try {
+        let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        if (vite && typeof vite.ssrFixStacktrace === 'function') {
+          vite.ssrFixStacktrace(e as Error);
+        }
+        next(e);
+      }
+    });
   } else {
     app.use(express.static(path.resolve(__dirname, 'dist')));
     app.get('*', (req, res) => {
