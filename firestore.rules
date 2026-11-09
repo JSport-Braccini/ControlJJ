@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // System configuration and real-time state sync
+    match /system/{docId} {
+      allow read: if true;
+      allow write: if isValidId(docId);
+    }
+
+    // Tournaments collection
+    match /tournaments/{tournamentId} {
+      allow read: if true;
+      allow write: if isValidId(tournamentId);
+    }
+
+    // Digital Tickets (Guest purchases & Gate verification)
+    match /digitalTickets/{ticketId} {
+      allow read: if true;
+      allow create: if isValidId(ticketId)
+        && request.resource.data.keys().hasAll(['id', 'tournamentId', 'qrCode', 'totalAmount', 'paymentStatus', 'channel'])
+        && request.resource.data.totalAmount is number
+        && request.resource.data.paymentStatus in ['PAID', 'RESERVED_UNPAID']
+        && request.resource.data.channel in ['WEB', 'VENUE'];
+      allow update, delete: if isValidId(ticketId);
+    }
+
+    // System operator accounts
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if isValidId(userId);
+    }
+  }
+}

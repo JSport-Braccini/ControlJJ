@@ -26,6 +26,13 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
   const [tagline, setTagline] = useState(config.tagline);
   const [logoUrl, setLogoUrl] = useState(config.logoUrl);
   const [showManualUrl, setShowManualUrl] = useState(false);
+  const [yapePhone, setYapePhone] = useState(config.yapePhone || '987 654 321');
+  const [yapeHolder, setYapeHolder] = useState(config.yapeHolder || 'Organización JJ Deportes');
+  const [plinPhone, setPlinPhone] = useState(config.plinPhone || '987 654 321');
+  const [plinHolder, setPlinHolder] = useState(config.plinHolder || 'Organización JJ Deportes');
+  const [bankName, setBankName] = useState(config.bankName || 'BCP Banco de Crédito');
+  const [bankAccount, setBankAccount] = useState(config.bankAccount || '193-98234812-0-45');
+  const [bankHolder, setBankHolder] = useState(config.bankHolder || 'Organización JJ Deportes EIRL');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -53,6 +60,13 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
       systemName: systemName.trim(),
       tagline: tagline.trim(),
       logoUrl: logoUrl.trim() || DEFAULT_SYSTEM_CONFIG.logoUrl,
+      yapePhone: yapePhone.trim(),
+      yapeHolder: yapeHolder.trim(),
+      plinPhone: plinPhone.trim(),
+      plinHolder: plinHolder.trim(),
+      bankName: bankName.trim(),
+      bankAccount: bankAccount.trim(),
+      bankHolder: bankHolder.trim(),
     });
     onClose();
   };
@@ -185,6 +199,94 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                 />
               </div>
             )}
+          </div>
+
+          {/* Métodos de Pago Oficiales para Ventas Web y Taquilla */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-900">
+                Cuentas de Pago para Venta de Boletos
+              </label>
+              <p className="text-[11px] text-slate-500">
+                Se muestran a los aficionados al comprar por la web o transferir
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="block text-[11px] font-semibold text-purple-900 mb-0.5">
+                  Número Yape Oficial:
+                </label>
+                <input
+                  type="text"
+                  value={yapePhone}
+                  onChange={(e) => setYapePhone(e.target.value)}
+                  placeholder="987 654 321"
+                  className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-purple-900 mb-0.5">
+                  Titular Yape:
+                </label>
+                <input
+                  type="text"
+                  value={yapeHolder}
+                  onChange={(e) => setYapeHolder(e.target.value)}
+                  placeholder="Organización JJ Deportes"
+                  className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-teal-900 mb-0.5">
+                  Número Plin Oficial:
+                </label>
+                <input
+                  type="text"
+                  value={plinPhone}
+                  onChange={(e) => setPlinPhone(e.target.value)}
+                  placeholder="987 654 321"
+                  className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-teal-900 mb-0.5">
+                  Titular Plin:
+                </label>
+                <input
+                  type="text"
+                  value={plinHolder}
+                  onChange={(e) => setPlinHolder(e.target.value)}
+                  placeholder="Organización JJ Deportes"
+                  className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
+                />
+              </div>
+
+              <div className="sm:col-span-2 space-y-1">
+                <label className="block text-[11px] font-semibold text-slate-800">
+                  Banco y Número de Cuenta:
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={bankName}
+                    onChange={(e) => setBankName(e.target.value)}
+                    placeholder="BCP Banco de Crédito"
+                    className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
+                  />
+                  <input
+                    type="text"
+                    value={bankAccount}
+                    onChange={(e) => setBankAccount(e.target.value)}
+                    placeholder="193-98234812-0-45"
+                    className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-mono"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="pt-2 flex items-center justify-between border-t border-slate-100">

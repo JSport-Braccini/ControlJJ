@@ -14,13 +14,29 @@ import {
   Shield,
   Camera,
   Gift,
+  Share2,
+  Smartphone,
+  Minus,
 } from 'lucide-react';
-import { SpectatorTier, SpectatorEntry, SpectatorTicketType, UserRole } from '../types/championship';
+import {
+  SpectatorTier,
+  SpectatorEntry,
+  SpectatorTicketType,
+  UserRole,
+  DigitalTicket,
+  DigitalTicketItem,
+  Tournament,
+  SystemConfig,
+  PaymentMethod,
+} from '../types/championship';
 import { QrCodeImage } from './QrCodeImage';
 import { CameraQrModal } from './CameraQrModal';
+import { DigitalTicketCard } from './DigitalTicketCard';
 
 interface SpectatorsManagerProps {
   tournamentId: string;
+  tournament?: Tournament;
+  systemConfig?: SystemConfig;
   tiers: SpectatorTier[];
   entries: SpectatorEntry[];
   currentUserRole: UserRole;
@@ -28,10 +44,13 @@ interface SpectatorsManagerProps {
   onUpdateTierPrice: (tierId: string, newPrice: number, label?: string, description?: string) => void;
   onAddTicketTier: (tier: SpectatorTier) => void;
   onDeleteTicketTier: (tierId: string) => void;
+  onSellVenueTicket?: (ticket: DigitalTicket) => void;
 }
 
 export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
   tournamentId,
+  tournament,
+  systemConfig,
   tiers,
   entries,
   currentUserRole,
@@ -39,12 +58,21 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
   onUpdateTierPrice,
   onAddTicketTier,
   onDeleteTicketTier,
+  onSellVenueTicket,
 }) => {
   const isAdmin = currentUserRole === 'ADMIN';
 
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [editingTier, setEditingTier] = useState<SpectatorTier | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+
+  // Venue ticket sale with WhatsApp sharing (Multi-boletos en una sola compra)
+  const [showVenueSaleModal, setShowVenueSaleModal] = useState(false);
+  const [venueBuyerName, setVenueBuyerName] = useState('');
+  const [venueBuyerPhone, setVenueBuyerPhone] = useState('');
+  const [venueTierQuantities, setVenueTierQuantities] = useState<Record<string, number>>({});
+  const [venuePaymentMethod, setVenuePaymentMethod] = useState<PaymentMethod>('EFECTIVO_PUERTA');
+  const [lastSoldTicket, setLastSoldTicket] = useState<DigitalTicket | null>(null);
 
   // Direct Ticket Scan Input
   const [ticketScanCode, setTicketScanCode] = useState('');
@@ -74,6 +102,9 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
     .filter((e) => (e.ticketType === 'ADULTO' || e.ticketType === 'VIP') && !e.isChild && e.price > 0)
     .reduce((acc, e) => acc + e.quantity, 0);
   const totalRevenue = entries.reduce((acc, e) => acc + e.totalAmount, 0);
+
+  const totalVenueQty = tiers.reduce((acc, t) => acc + (venueTierQuantities[t.id] || 0), 0);
+  const totalVenueAmount = tiers.reduce((acc, t) => acc + (venueTierQuantities[t.id] || 0) * t.price, 0);
 
   const handleOpenAdd = () => {
     if (!isAdmin) {
@@ -159,6 +190,88 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
     setTicketScanCode('');
   };
 
+  const handleVenueSaleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!venueBuyerName.trim()) return;
+
+    // Filter tiers with quantity > 0
+    const items: DigitalTicketItem[] = [];
+    tiers.forEach((t) => {
+      const qty = venueTierQuantities[t.id] || 0;
+      if (qty > 0) {
+        items.push({
+          ticketType: t.type,
+          label: t.label,
+          quantity: qty,
+          unitPrice: t.price,
+          subtotal: qty * t.price,
+        });
+      }
+    });
+
+    const totalQty = items.reduce((acc, it) => acc + it.quantity, 0);
+    const totalAmount = items.reduce((acc, it) => acc + it.subtotal, 0);
+
+    if (totalQty === 0) {
+      alert('Por favor selecciona al menos 1 entrada con los botones (+) para continuar la venta.');
+      return;
+    }
+
+    const qrCode = `TK-LOC-${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 90 + 10)}`;
+    const primaryType: SpectatorTicketType = items.length === 1 ? items[0].ticketType : 'MIXTO';
+    const summaryLabel = items.map((it) => `${it.quantity}x ${it.label}`).join(' + ');
+
+    const newTicket: DigitalTicket = {
+      id: `ticket-venue-${Date.now()}`,
+      tournamentId,
+      qrCode,
+      ticketType: primaryType,
+      label: summaryLabel,
+      eventDayLabel: tournament?.date ? `Jornada ${tournament.date}` : 'Jornada Oficial',
+      eventDate: tournament?.date || new Date().toISOString().slice(0, 10),
+      buyerName: venueBuyerName.trim(),
+      buyerPhone: venueBuyerPhone.trim(),
+      buyerDni: '',
+      quantity: totalQty,
+      unitPrice: totalQty > 0 ? totalAmount / totalQty : 0,
+      totalAmount,
+      paymentStatus: 'PAID',
+      paymentMethod: venuePaymentMethod,
+      channel: 'VENUE',
+      assisted: false,
+      createdAt: new Date().toISOString(),
+      items,
+    };
+
+    if (onSellVenueTicket) {
+      onSellVenueTicket(newTicket);
+    } else {
+      items.forEach((it) => {
+        onRegisterSpectator(it.ticketType, it.quantity);
+      });
+    }
+
+    setLastSoldTicket(newTicket);
+    setShowVenueSaleModal(false);
+
+    // Open WhatsApp directly if phone provided!
+    const itemsListText = items.map((it) => `  • ${it.quantity}x ${it.label}: S/ ${it.subtotal.toFixed(2)}`).join('\n');
+    const message = `🎟️ *BOLETO DIGITAL OFICIAL - ${tournament?.name || 'JJ CopaControl'}*\n\n` +
+      `👤 *Comprador:* ${newTicket.buyerName}\n` +
+      `🎫 *Boletos Adquiridos (${newTicket.quantity} entradas):*\n${itemsListText}\n\n` +
+      `💰 *Total Cobrado:* S/ ${newTicket.totalAmount.toFixed(2)} (Pago: ${venuePaymentMethod === 'EFECTIVO_PUERTA' ? 'Efectivo en Puerta' : venuePaymentMethod})\n` +
+      `🔢 *Código QR Único:* ${newTicket.qrCode}\n` +
+      `✅ *Estado:* PAGADO EN TAQUILLA LOCAL\n\n` +
+      `Muestra este código al ingresar al partido.`;
+
+    const cleanPhone = venueBuyerPhone.replace(/\D/g, '');
+    const targetUrl = cleanPhone
+      ? `https://api.whatsapp.com/send?phone=51${cleanPhone}&text=${encodeURIComponent(message)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+
+    window.open(targetUrl, '_blank');
+  };
+
   return (
     <div className="space-y-6 w-full max-w-full">
       {/* Encabezado */}
@@ -172,20 +285,36 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
           </p>
         </div>
 
-        {isAdmin ? (
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
-            onClick={handleOpenAdd}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs min-h-[44px]"
+            onClick={() => {
+              if (tiers.length > 0 && Object.keys(venueTierQuantities).length === 0) {
+                setVenueTierQuantities({ [tiers[0].id]: 1 });
+              }
+              setShowVenueSaleModal(true);
+            }}
+            className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs min-h-[44px]"
           >
-            <Plus className="w-4 h-4 text-emerald-400" />
-            Nuevo Tipo de Entrada
+            <Share2 className="w-4 h-4 text-white" />
+            <span>Venta y Envío a WhatsApp</span>
           </button>
-        ) : (
-          <div className="text-xs text-slate-500 bg-slate-100 px-3 py-2 rounded-lg border border-slate-200">
-            Estación: Control de ingreso y conteo de taquilla
-          </div>
-        )}
+
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={handleOpenAdd}
+              className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs min-h-[44px]"
+            >
+              <Plus className="w-4 h-4 text-emerald-400" />
+              <span>Nuevo Tipo de Entrada</span>
+            </button>
+          ) : (
+            <div className="text-xs text-slate-500 bg-slate-100 px-3 py-2 rounded-lg border border-slate-200">
+              Estación: Control y Venta
+            </div>
+          )}
+        </div>
       </div>
 
       {/* KPI Bar */}
@@ -776,6 +905,233 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
         subtitle="Enfoca el boleto QR del espectador"
         scanCategory="ESPECTADOR"
       />
+
+      {/* Modal Venta en Puerta con Envío Inmediato a WhatsApp */}
+      {showVenueSaleModal && (
+        <div className="fixed inset-0 z-50 bg-[#0A192F]/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl p-5 space-y-4 my-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-[#25D366]/10 flex items-center justify-center">
+                  <Share2 className="w-4 h-4 text-[#25D366]" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 font-display">
+                    Venta en Puerta con Envío a WhatsApp
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Genera el QR oficial y envíalo al WhatsApp del cliente
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowVenueSaleModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleVenueSaleSubmit} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Nombre Completo del Cliente *
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={venueBuyerName}
+                  onChange={(e) => setVenueBuyerName(e.target.value)}
+                  placeholder="Ej: Roberto Quispe"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0A192F]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Número de WhatsApp del Cliente *
+                </label>
+                <input
+                  type="tel"
+                  required
+                  value={venueBuyerPhone}
+                  onChange={(e) => setVenueBuyerPhone(e.target.value)}
+                  placeholder="Ej: 987654321"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-[#0A192F]"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-[11px] font-bold text-slate-700">
+                    Selección de Boletos (Combina varios tipos):
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-medium">
+                    {totalVenueQty} seleccionados
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                  {tiers.map((t) => {
+                    const qty = venueTierQuantities[t.id] || 0;
+                    return (
+                      <div
+                        key={t.id}
+                        className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 transition-all ${
+                          qty > 0 ? 'border-[#0A192F] bg-blue-50/30' : 'border-slate-200 bg-white'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-slate-900 block truncate">
+                            {t.label}
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-mono">
+                            S/ {t.price.toFixed(2)} c/u
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="text-right mr-1">
+                            <span className="text-xs font-bold font-mono text-slate-900 block">
+                              S/ {(qty * t.price).toFixed(2)}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg p-0.5 shadow-2xs">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setVenueTierQuantities((prev) => ({
+                                  ...prev,
+                                  [t.id]: Math.max(0, (prev[t.id] || 0) - 1),
+                                }))
+                              }
+                              disabled={qty === 0}
+                              className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center text-slate-700 font-bold text-xs cursor-pointer"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <span className="w-6 text-center font-bold text-xs font-mono text-slate-900">
+                              {qty}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setVenueTierQuantities((prev) => ({
+                                  ...prev,
+                                  [t.id]: Math.min(50, (prev[t.id] || 0) + 1),
+                                }))
+                              }
+                              className="w-6 h-6 rounded bg-[#0A192F] hover:bg-slate-800 text-white flex items-center justify-center font-bold text-xs cursor-pointer"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Totalizador de Taquilla */}
+                <div className="bg-slate-900 text-white p-2.5 rounded-xl flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-slate-300 block text-[10px] font-semibold uppercase">Total Entradas</span>
+                    <span className="font-bold">{totalVenueQty} personas</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-slate-300 block text-[10px] font-semibold uppercase">Total a Cobrar</span>
+                    <span className="font-extrabold text-sm font-mono text-emerald-400">
+                      S/ {totalVenueAmount.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Método de Pago Recibido:
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setVenuePaymentMethod('EFECTIVO_PUERTA')}
+                    className={`py-1.5 px-2 rounded-lg border text-center font-bold text-[11px] cursor-pointer ${
+                      venuePaymentMethod === 'EFECTIVO_PUERTA'
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-slate-50 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    Efectivo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVenuePaymentMethod('YAPE')}
+                    className={`py-1.5 px-2 rounded-lg border text-center font-bold text-[11px] cursor-pointer ${
+                      venuePaymentMethod === 'YAPE'
+                        ? 'bg-[#742384] text-white border-[#742384]'
+                        : 'bg-slate-50 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    Yape
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVenuePaymentMethod('PLIN')}
+                    className={`py-1.5 px-2 rounded-lg border text-center font-bold text-[11px] cursor-pointer ${
+                      venuePaymentMethod === 'PLIN'
+                        ? 'bg-[#00D4B2] text-slate-900 border-[#00D4B2]'
+                        : 'bg-slate-50 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    Plin
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowVenueSaleModal(false)}
+                  className="flex-1 py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={totalVenueQty === 0}
+                  className={`flex-2 py-2.5 px-3 rounded-xl shadow-md flex items-center justify-center gap-1.5 text-xs font-bold ${
+                    totalVenueQty === 0
+                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                      : 'bg-[#25D366] hover:bg-[#20bd5a] text-white cursor-pointer'
+                  }`}
+                >
+                  <Share2 className="w-4 h-4" />
+                  <span>
+                    {totalVenueQty === 0
+                      ? 'Selecciona entradas'
+                      : `Cobrar S/ ${totalVenueAmount.toFixed(2)} y WhatsApp`}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Tarjeta Visual de Boleto Recién Vendido */}
+      {lastSoldTicket && tournament && systemConfig && (
+        <div className="fixed inset-0 z-50 bg-[#0A192F]/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <DigitalTicketCard
+            ticket={lastSoldTicket}
+            tournament={tournament}
+            systemConfig={systemConfig}
+            onClose={() => setLastSoldTicket(null)}
+          />
+        </div>
+      )}
     </div>
   );
 };

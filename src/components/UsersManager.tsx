@@ -47,6 +47,7 @@ export const UsersManager: React.FC<UsersManagerProps> = ({
     CONTROL_JUGADORES: { label: 'Control Jugadores', color: 'bg-blue-50 text-blue-800 border-blue-200' },
     CONTROL_ESPECTADORES: { label: 'Control Espectadores', color: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
     CONTROL_BEBIDAS: { label: 'Control Bebidas', color: 'bg-amber-50 text-amber-800 border-amber-200' },
+    INVITADO_VENTA: { label: 'Portal Invitado / Aficionado', color: 'bg-purple-50 text-purple-800 border-purple-200' },
   };
 
   const handleOpenAdd = () => {
@@ -74,6 +75,7 @@ export const UsersManager: React.FC<UsersManagerProps> = ({
       CONTROL_JUGADORES: '#1D4ED8',
       CONTROL_ESPECTADORES: '#047857',
       CONTROL_BEBIDAS: '#B45309',
+      INVITADO_VENTA: '#7E22CE',
     };
 
     const newUser: AuthUser = {

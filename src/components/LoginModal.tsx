@@ -155,9 +155,41 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </button>
             </form>
 
+            {/* Acceso para Aficionados / Venta de Entradas */}
+            <div className="pt-1">
+              <div className="relative my-2.5">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-slate-200" />
+                </div>
+                <div className="relative flex justify-center text-[10px] uppercase font-bold text-slate-400">
+                  <span className="bg-white px-2">Portal de Espectadores</span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const guestUser: AuthUser = {
+                    id: `guest-${Date.now()}`,
+                    username: 'invitado',
+                    displayName: 'Aficionado / Invitado',
+                    role: 'INVITADO_VENTA',
+                    avatarColor: '#DC2626',
+                    createdAt: new Date().toISOString(),
+                    active: true,
+                  };
+                  onLoginSuccess(guestUser);
+                }}
+                className="w-full py-2.5 px-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 active:from-red-800 active:to-red-900 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-2 group border border-red-500/30"
+              >
+                <Trophy className="w-4 h-4 text-amber-300" />
+                <span>Comprar Entradas Online (Modo Invitado)</span>
+              </button>
+            </div>
+
             <div className="pt-2 text-center border-t border-slate-100 flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
               <Lock className="w-3 h-3 text-slate-400" />
-              <span>CopaControl JJ Cloud · Acceso Protegido y Cifrado</span>
+              <span>CopaControl JJ Cloud · Sincronizado en Tiempo Real</span>
             </div>
           </div>
         </div>

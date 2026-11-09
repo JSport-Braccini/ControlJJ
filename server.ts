@@ -33,18 +33,45 @@ const server = createServer(app);
 
 app.use(express.json());
 
-// In-Memory Cloud Server State (Authoritative source of truth)
-const serverData: AppServerData = {
-  config: { ...DEFAULT_SYSTEM_CONFIG },
-  users: [...INITIAL_AUTH_USERS],
-  tournaments: [DEFAULT_TOURNAMENT],
-  activeTournamentId: DEFAULT_TOURNAMENT.id,
-  statesByTournament: {
-    [DEFAULT_TOURNAMENT.id]: createInitialTournamentState(DEFAULT_TOURNAMENT),
-  },
-  connectedClientsCount: 0,
-  onlineUsers: [],
-};
+// Persistent Local File DB (Guarantees no data loss across server restarts)
+const DB_FILE = path.resolve(__dirname, 'data', 'copacontrol_store.json');
+
+function loadPersistedState(): AppServerData {
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.tournaments && parsed.statesByTournament) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Could not read disk state:', err);
+  }
+  return {
+    config: { ...DEFAULT_SYSTEM_CONFIG },
+    users: [...INITIAL_AUTH_USERS],
+    tournaments: [DEFAULT_TOURNAMENT],
+    activeTournamentId: DEFAULT_TOURNAMENT.id,
+    statesByTournament: {
+      [DEFAULT_TOURNAMENT.id]: createInitialTournamentState(DEFAULT_TOURNAMENT),
+    },
+    connectedClientsCount: 0,
+    onlineUsers: [],
+  };
+}
+
+const serverData: AppServerData = loadPersistedState();
+
+function persistState() {
+  try {
+    const dir = path.dirname(DB_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(DB_FILE, JSON.stringify(serverData, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving disk state:', err);
+  }
+}
 
 // WebSocket Server attached to same HTTP server
 const wss = new WebSocketServer({ server });
@@ -75,6 +102,7 @@ function broadcast(type: string, payload: unknown, skipSender?: WebSocket) {
 }
 
 function broadcastFullState() {
+  persistState();
   const payload = {
     ...serverData,
     connectedClientsCount: wss.clients.size,
@@ -262,6 +290,104 @@ function handleClientAction(
         state.scanHistory.unshift(feedback);
         broadcastFullState();
         return;
+      }
+
+      // Check Digital Ticket
+      const matchedTicket = (state.digitalTickets || []).find((dt) => dt.qrCode.toUpperCase() === code);
+      if (matchedTicket) {
+        if (matchedTicket.assisted) {
+          const feedback = {
+            id: `fb-${Date.now()}`,
+            status: 'duplicate' as const,
+            category: 'ESPECTADOR' as const,
+            title: '¡BOLETO YA FUE UTILIZADO! — Entrada Marcada',
+            message: `El boleto de ${matchedTicket.buyerName} (${matchedTicket.quantity}x ${matchedTicket.label}) ya registró su ingreso a las ${matchedTicket.checkInTime || 'anteriormente'}.`,
+            detail: `Código: ${matchedTicket.qrCode} · Fecha: ${matchedTicket.eventDayLabel}`,
+            timestamp: nowTime,
+            qrCode: code,
+          };
+          state.scanHistory.unshift(feedback);
+          broadcastFullState();
+          return;
+        }
+
+        if (matchedTicket.paymentStatus === 'PAID') {
+          matchedTicket.assisted = true;
+          matchedTicket.checkInTime = nowTime;
+          matchedTicket.validatedBy = registeredBy || 'Módulo Puerta';
+
+          const alreadyRecorded = state.spectatorEntries.some((se) => se.qrCode === matchedTicket.qrCode);
+          if (!alreadyRecorded) {
+            if (matchedTicket.items && matchedTicket.items.length > 0) {
+              matchedTicket.items.forEach((it, idx) => {
+                state.spectatorEntries.unshift({
+                  id: `se-${Date.now()}-${idx}`,
+                  tournamentId,
+                  qrCode: matchedTicket.qrCode,
+                  ticketType: it.ticketType,
+                  label: `${it.label} (${matchedTicket.eventDayLabel})`,
+                  price: it.unitPrice,
+                  isChild: it.ticketType === 'NINO',
+                  quantity: it.quantity,
+                  totalAmount: it.subtotal,
+                  timestamp: nowTime,
+                  registeredBy: `Web / ${matchedTicket.paymentMethod}`,
+                });
+              });
+            } else {
+              state.spectatorEntries.unshift({
+                id: `se-${Date.now()}`,
+                tournamentId,
+                qrCode: matchedTicket.qrCode,
+                ticketType: matchedTicket.ticketType,
+                label: `${matchedTicket.label} (${matchedTicket.eventDayLabel})`,
+                price: matchedTicket.unitPrice,
+                isChild: matchedTicket.ticketType === 'NINO',
+                quantity: matchedTicket.quantity,
+                totalAmount: matchedTicket.totalAmount,
+                timestamp: nowTime,
+                registeredBy: `Web / ${matchedTicket.paymentMethod}`,
+              });
+            }
+          }
+
+          const breakdownText = matchedTicket.items && matchedTicket.items.length > 0
+            ? matchedTicket.items.map((it) => `${it.quantity}x ${it.label}`).join(', ')
+            : `${matchedTicket.quantity}x ${matchedTicket.label}`;
+
+          const feedback = {
+            id: `fb-${Date.now()}`,
+            status: 'success' as const,
+            category: 'ESPECTADOR' as const,
+            title: '¡ACCESO PERMITIDO - ENTRADA PAGADA!',
+            message: `${matchedTicket.buyerName} (${breakdownText} · Total ${matchedTicket.quantity} pers.) — Cancelado vía ${matchedTicket.paymentMethod}. Total: S/ ${matchedTicket.totalAmount.toFixed(2)}`,
+            detail: `DNI/Tel: ${matchedTicket.buyerDni || matchedTicket.buyerPhone || 'Registrado'} · Habilitado en Tribuna`,
+            timestamp: nowTime,
+            qrCode: code,
+          };
+          state.scanHistory.unshift(feedback);
+          broadcastFullState();
+          return;
+        } else {
+          // RESERVED_UNPAID
+          const breakdownText = matchedTicket.items && matchedTicket.items.length > 0
+            ? matchedTicket.items.map((it) => `${it.quantity}x ${it.label}`).join(', ')
+            : `${matchedTicket.quantity}x ${matchedTicket.label}`;
+
+          const feedback = {
+            id: `fb-${Date.now()}`,
+            status: 'error' as const,
+            category: 'ESPECTADOR' as const,
+            title: '⚠️ ¡ALERTA: PAGO PENDIENTE! Entrada Separada vía Web',
+            message: `El boleto de ${matchedTicket.buyerName} está SEPARADO y debe abonar S/ ${matchedTicket.totalAmount.toFixed(2)} en puerta (${breakdownText} · Total ${matchedTicket.quantity} pers.).`,
+            detail: `ID:${matchedTicket.id}|TOTAL:${matchedTicket.totalAmount}|BUYER:${matchedTicket.buyerName}|QTY:${matchedTicket.quantity}|LABEL:${matchedTicket.label}`,
+            timestamp: nowTime,
+            qrCode: code,
+          };
+          state.scanHistory.unshift(feedback);
+          broadcastFullState();
+          return;
+        }
       }
 
       // Check Spectator Tier
@@ -494,6 +620,137 @@ function handleClientAction(
       break;
     }
 
+    // DIGITAL TICKETS (WEB & VENUE)
+    case 'CREATE_DIGITAL_TICKET': {
+      const { tournamentId, ticket } = payload;
+      const state = serverData.statesByTournament[tournamentId];
+      if (state) {
+        state.digitalTickets = [ticket, ...(state.digitalTickets || [])];
+        if (ticket.channel === 'VENUE' && ticket.paymentStatus === 'PAID') {
+          if (ticket.items && ticket.items.length > 0) {
+            ticket.items.forEach((it: any, idx: number) => {
+              state.spectatorEntries.unshift({
+                id: `se-${Date.now()}-${idx}`,
+                tournamentId,
+                qrCode: ticket.qrCode,
+                ticketType: it.ticketType,
+                label: `${it.label} (${ticket.eventDayLabel})`,
+                price: it.unitPrice,
+                isChild: it.ticketType === 'NINO',
+                quantity: it.quantity,
+                totalAmount: it.subtotal,
+                timestamp: new Date().toTimeString().slice(0, 8),
+                registeredBy: `Taquilla Local (${ticket.paymentMethod})`,
+              });
+            });
+          } else {
+            state.spectatorEntries.unshift({
+              id: `se-${Date.now()}`,
+              tournamentId,
+              qrCode: ticket.qrCode,
+              ticketType: ticket.ticketType,
+              label: `${ticket.label} (${ticket.eventDayLabel})`,
+              price: ticket.unitPrice,
+              isChild: ticket.ticketType === 'NINO',
+              quantity: ticket.quantity,
+              totalAmount: ticket.totalAmount,
+              timestamp: new Date().toTimeString().slice(0, 8),
+              registeredBy: `Taquilla Local (${ticket.paymentMethod})`,
+            });
+          }
+        }
+        broadcastFullState();
+      }
+      break;
+    }
+
+    case 'CONFIRM_DOOR_PAYMENT_AND_CHECKIN': {
+      const { tournamentId, ticketId, paymentMethod = 'EFECTIVO_PUERTA', operatorName } = payload;
+      const state = serverData.statesByTournament[tournamentId];
+      if (state && state.digitalTickets) {
+        const nowTime = new Date().toTimeString().slice(0, 8);
+        const ticket = state.digitalTickets.find((t) => t.id === ticketId);
+        if (ticket) {
+          ticket.paymentStatus = 'PAID';
+          ticket.paidAtDoor = true;
+          ticket.paidAtDoorTime = nowTime;
+          ticket.paidAtDoorMethod = paymentMethod;
+          ticket.assisted = true;
+          ticket.checkInTime = nowTime;
+          ticket.validatedBy = operatorName || 'Puerta de Acceso';
+
+          if (ticket.items && ticket.items.length > 0) {
+            ticket.items.forEach((it: any, idx: number) => {
+              state.spectatorEntries.unshift({
+                id: `se-door-${Date.now()}-${idx}`,
+                tournamentId,
+                qrCode: ticket.qrCode,
+                ticketType: it.ticketType,
+                label: `${it.label} (Cancelado en Puerta)`,
+                price: it.unitPrice,
+                isChild: it.ticketType === 'NINO',
+                quantity: it.quantity,
+                totalAmount: it.subtotal,
+                timestamp: nowTime,
+                registeredBy: `${operatorName || 'Puerta'} / Cobro ${paymentMethod}`,
+              });
+            });
+          } else {
+            state.spectatorEntries.unshift({
+              id: `se-door-${Date.now()}`,
+              tournamentId,
+              qrCode: ticket.qrCode,
+              ticketType: ticket.ticketType,
+              label: `${ticket.label} (Cancelado en Puerta)`,
+              price: ticket.unitPrice,
+              isChild: ticket.ticketType === 'NINO',
+              quantity: ticket.quantity,
+              totalAmount: ticket.totalAmount,
+              timestamp: nowTime,
+              registeredBy: `${operatorName || 'Puerta'} / Cobro ${paymentMethod}`,
+            });
+          }
+
+          const feedback = {
+            id: `fb-${Date.now()}`,
+            status: 'success' as const,
+            category: 'ESPECTADOR' as const,
+            title: '¡PAGO COBRADO EN PUERTA E INGRESO REGISTRADO!',
+            message: `${ticket.buyerName} abonó S/ ${ticket.totalAmount.toFixed(2)} por ${paymentMethod}. Ingreso habilitado.`,
+            timestamp: nowTime,
+            qrCode: ticket.qrCode,
+          };
+          state.scanHistory.unshift(feedback);
+          broadcastFullState();
+        }
+      }
+      break;
+    }
+
+    case 'DELETE_DIGITAL_TICKET': {
+      const { tournamentId, ticketId } = payload;
+      const state = serverData.statesByTournament[tournamentId];
+      if (state && state.digitalTickets) {
+        state.digitalTickets = state.digitalTickets.filter((tk) => tk.id !== ticketId);
+        broadcastFullState();
+      }
+      break;
+    }
+
+    case 'UPDATE_EVENT_DAYS': {
+      const { tournamentId, eventDays } = payload;
+      const state = serverData.statesByTournament[tournamentId];
+      if (state) {
+        state.tournament.eventDays = eventDays;
+        const tIdx = serverData.tournaments.findIndex((t) => t.id === tournamentId);
+        if (tIdx !== -1) {
+          serverData.tournaments[tIdx].eventDays = eventDays;
+        }
+        broadcastFullState();
+      }
+      break;
+    }
+
     case 'RESET_ALL_DATA_TO_ZERO': {
       const { tournamentId } = payload;
       const state = serverData.statesByTournament[tournamentId];
@@ -511,6 +768,7 @@ function handleClientAction(
         }));
         state.beverageSales = [];
         state.expenses = [];
+        state.digitalTickets = [];
         state.scanHistory = [];
         broadcastFullState();
       }

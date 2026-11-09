@@ -23,6 +23,7 @@ import {
   BeverageProduct,
   BeverageSale,
   ExpenseItem,
+  DigitalTicket,
 } from '../types/championship';
 
 interface GeneralReportProps {
@@ -33,6 +34,7 @@ interface GeneralReportProps {
   beverages: BeverageProduct[];
   beverageSales: BeverageSale[];
   expenses: ExpenseItem[];
+  digitalTickets?: DigitalTicket[];
 }
 
 export const GeneralReport: React.FC<GeneralReportProps> = ({
@@ -43,6 +45,7 @@ export const GeneralReport: React.FC<GeneralReportProps> = ({
   beverages = [],
   beverageSales = [],
   expenses = [],
+  digitalTickets = [],
 }) => {
   // Ingresos
   const totalTicketRevenue = spectatorEntries.reduce((acc, e) => acc + e.totalAmount, 0);
@@ -93,6 +96,53 @@ export const GeneralReport: React.FC<GeneralReportProps> = ({
     PERSONAL: 'Personal y Seguridad',
     OTROS: 'Otros Gastos',
   };
+
+  // Desglose de Ventas Web vs Puerta y Métodos de Pago
+  const dTickets = digitalTickets || [];
+  const webPaid = dTickets.filter(
+    (t) => t.channel === 'WEB' && t.paymentStatus === 'PAID' && !t.paidAtDoor
+  );
+  const totalWebPaid = webPaid.reduce((acc, t) => acc + t.totalAmount, 0);
+
+  const webReserved = dTickets.filter(
+    (t) => t.channel === 'WEB' && t.paymentStatus === 'RESERVED_UNPAID'
+  );
+  const totalWebReserved = webReserved.reduce((acc, t) => acc + t.totalAmount, 0);
+
+  const doorSales = dTickets.filter((t) => t.paidAtDoor || t.channel === 'VENUE');
+  const totalDoorSales = doorSales.reduce((acc, t) => acc + t.totalAmount, 0);
+
+  const cashTotal = dTickets
+    .filter(
+      (t) =>
+        t.paymentStatus === 'PAID' &&
+        (t.paymentMethod === 'EFECTIVO_PUERTA' || t.paidAtDoorMethod === 'EFECTIVO_PUERTA')
+    )
+    .reduce((acc, t) => acc + t.totalAmount, 0);
+
+  const yapeTotal = dTickets
+    .filter(
+      (t) =>
+        t.paymentStatus === 'PAID' &&
+        (t.paymentMethod === 'YAPE' || t.paidAtDoorMethod === 'YAPE')
+    )
+    .reduce((acc, t) => acc + t.totalAmount, 0);
+
+  const plinTotal = dTickets
+    .filter(
+      (t) =>
+        t.paymentStatus === 'PAID' &&
+        (t.paymentMethod === 'PLIN' || t.paidAtDoorMethod === 'PLIN')
+    )
+    .reduce((acc, t) => acc + t.totalAmount, 0);
+
+  const transferTotal = dTickets
+    .filter(
+      (t) =>
+        t.paymentStatus === 'PAID' &&
+        (t.paymentMethod === 'TRANSFER' || t.paidAtDoorMethod === 'TRANSFER')
+    )
+    .reduce((acc, t) => acc + t.totalAmount, 0);
 
   const handlePrint = () => {
     window.print();
@@ -459,6 +509,89 @@ export const GeneralReport: React.FC<GeneralReportProps> = ({
             <span className="font-bold text-red-600">
               {players.reduce((a, b) => a + b.duplicateAttempts, 0)} bloqueos
             </span>
+          </div>
+        </div>
+
+        {/* AUDITORÍA Y CONTROL DE CANALES DE VENTA (WEB VS PUERTA) Y MÉTODOS DE PAGO */}
+        <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs space-y-4 col-span-1 lg:col-span-2">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Ticket className="w-5 h-5 text-red-600" />
+              <div>
+                <h3 className="font-bold text-sm text-slate-900">
+                  Control de Ventas Web (Canceladas y Separadas) vs Cobradas el Día del Evento
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Discriminación contable de pagos anticipados online, reservas por cobrar y ventas presenciales
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* Web Canceladas */}
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+              <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">
+                Ventas Web Pagadas / Canceladas
+              </span>
+              <div className="text-xl font-bold font-mono text-emerald-900 mt-1">
+                S/ {totalWebPaid.toFixed(2)}
+              </div>
+              <div className="text-[11px] text-emerald-700 mt-0.5">
+                {webPaid.length} boletos cobrados anticipadamente
+              </div>
+            </div>
+
+            {/* Web Separadas */}
+            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl">
+              <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider block">
+                Web Separadas (Por Cobrar en Puerta)
+              </span>
+              <div className="text-xl font-bold font-mono text-amber-900 mt-1">
+                S/ {totalWebReserved.toFixed(2)}
+              </div>
+              <div className="text-[11px] text-amber-700 mt-0.5">
+                {webReserved.length} boletos reservados por cancelar
+              </div>
+            </div>
+
+            {/* Cobradas en Puerta */}
+            <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl">
+              <span className="text-[10px] font-bold text-blue-800 uppercase tracking-wider block">
+                Cobradas el Día del Evento (Puerta / Taquilla)
+              </span>
+              <div className="text-xl font-bold font-mono text-blue-900 mt-1">
+                S/ {totalDoorSales.toFixed(2)}
+              </div>
+              <div className="text-[11px] text-blue-700 mt-0.5">
+                {doorSales.length} boletos cobrados en la sede
+              </div>
+            </div>
+          </div>
+
+          {/* Desglose de Métodos de Pago */}
+          <div className="pt-2 border-t border-slate-100">
+            <span className="text-xs font-bold text-slate-700 block mb-2">
+              Ingresos Totales por Método de Pago:
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                <span className="text-slate-500 text-[10px] font-semibold block">Efectivo en Puerta</span>
+                <span className="font-mono font-bold text-slate-900 text-sm">S/ {cashTotal.toFixed(2)}</span>
+              </div>
+              <div className="bg-purple-50/60 p-2.5 rounded-lg border border-purple-200">
+                <span className="text-purple-700 text-[10px] font-semibold block">Yape</span>
+                <span className="font-mono font-bold text-purple-900 text-sm">S/ {yapeTotal.toFixed(2)}</span>
+              </div>
+              <div className="bg-teal-50/60 p-2.5 rounded-lg border border-teal-200">
+                <span className="text-teal-700 text-[10px] font-semibold block">Plin</span>
+                <span className="font-mono font-bold text-teal-900 text-sm">S/ {plinTotal.toFixed(2)}</span>
+              </div>
+              <div className="bg-blue-50/60 p-2.5 rounded-lg border border-blue-200">
+                <span className="text-blue-700 text-[10px] font-semibold block">Transferencia BCP</span>
+                <span className="font-mono font-bold text-blue-900 text-sm">S/ {transferTotal.toFixed(2)}</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

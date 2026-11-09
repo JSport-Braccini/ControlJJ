@@ -1,6 +1,21 @@
-export type ActiveTab = 'resumen' | 'jugadores' | 'espectadores' | 'bebidas' | 'gastos' | 'reporte' | 'torneos' | 'usuarios' | 'configuracion';
+export type ActiveTab =
+  | 'resumen'
+  | 'jugadores'
+  | 'espectadores'
+  | 'bebidas'
+  | 'gastos'
+  | 'reporte'
+  | 'torneos'
+  | 'usuarios'
+  | 'boletos'
+  | 'configuracion';
 
-export type UserRole = 'ADMIN' | 'CONTROL_JUGADORES' | 'CONTROL_ESPECTADORES' | 'CONTROL_BEBIDAS';
+export type UserRole =
+  | 'ADMIN'
+  | 'CONTROL_JUGADORES'
+  | 'CONTROL_ESPECTADORES'
+  | 'CONTROL_BEBIDAS'
+  | 'INVITADO_VENTA';
 
 export interface AuthUser {
   id: string;
@@ -13,12 +28,71 @@ export interface AuthUser {
   active: boolean;
 }
 
+export interface EventDayPricing {
+  id: string;
+  label: string; // e.g. "Día 1 - Fase de Grupos", "Día 2 - Cuartos y Semis", "Día 3 - Gran Final"
+  date: string;
+  adultPrice: number;
+  childPrice: number;
+  vipPrice: number;
+}
+
+export type PaymentMethod = 'YAPE' | 'PLIN' | 'TRANSFER' | 'EFECTIVO_PUERTA';
+export type TicketPaymentStatus = 'PAID' | 'RESERVED_UNPAID';
+export type TicketSalesChannel = 'WEB' | 'VENUE';
+
+export interface DigitalTicketItem {
+  ticketType: SpectatorTicketType;
+  label: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
+export interface DigitalTicket {
+  id: string;
+  tournamentId: string;
+  qrCode: string; // Unique ticket QR (e.g. TK-WEB-983201)
+  ticketType: SpectatorTicketType;
+  label: string;
+  eventDayId?: string;
+  eventDayLabel: string;
+  eventDate: string;
+  buyerName: string;
+  buyerPhone: string;
+  buyerDni: string;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+  paymentStatus: TicketPaymentStatus;
+  paymentMethod: PaymentMethod;
+  voucherUrl?: string;
+  channel: TicketSalesChannel;
+  assisted: boolean;
+  checkInTime?: string;
+  paidAtDoor?: boolean;
+  paidAtDoorTime?: string;
+  paidAtDoorMethod?: PaymentMethod;
+  validatedBy?: string;
+  createdAt: string;
+  items?: DigitalTicketItem[];
+}
+
 export interface SystemConfig {
   systemName: string;
   tagline: string;
   logoUrl: string;
   primaryColor: string;
   accentColor: string;
+  // Métodos de pago para venta online y taquilla
+  yapePhone?: string;
+  yapeHolder?: string;
+  plinPhone?: string;
+  plinHolder?: string;
+  bankName?: string;
+  bankAccount?: string;
+  bankCci?: string;
+  bankHolder?: string;
 }
 
 export interface Player {
@@ -35,7 +109,7 @@ export interface Player {
   duplicateAttempts: number;
 }
 
-export type SpectatorTicketType = 'ADULTO' | 'NINO' | 'VIP' | 'GRATIS';
+export type SpectatorTicketType = 'ADULTO' | 'NINO' | 'VIP' | 'GRATIS' | 'MIXTO';
 
 export interface ExpenseItem {
   id: string;
@@ -119,6 +193,7 @@ export interface Tournament {
   status: 'ACTIVE' | 'ARCHIVED';
   createdAt: string;
   notes?: string;
+  eventDays?: EventDayPricing[];
 }
 
 export interface TournamentState {
@@ -129,6 +204,7 @@ export interface TournamentState {
   beverages: BeverageProduct[];
   beverageSales: BeverageSale[];
   expenses: ExpenseItem[];
+  digitalTickets: DigitalTicket[];
   scanHistory: ScanFeedback[];
 }
 

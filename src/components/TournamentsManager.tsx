@@ -14,7 +14,8 @@ import {
   CupSoda,
   ShieldAlert,
 } from 'lucide-react';
-import { Tournament, TournamentState, UserRole } from '../types/championship';
+import { Tournament, TournamentState, UserRole, EventDayPricing } from '../types/championship';
+import { EventDaysPricingModal } from './EventDaysPricingModal';
 
 interface TournamentsManagerProps {
   tournaments: Tournament[];
@@ -25,6 +26,7 @@ interface TournamentsManagerProps {
   onCreateTournament: (tournament: Tournament) => void;
   onUpdateTournament: (tournament: Tournament) => void;
   onDeleteTournament: (tournamentId: string) => void;
+  onUpdateEventDays?: (tournamentId: string, eventDays: EventDayPricing[]) => void;
 }
 
 export const TournamentsManager: React.FC<TournamentsManagerProps> = ({
@@ -36,11 +38,13 @@ export const TournamentsManager: React.FC<TournamentsManagerProps> = ({
   onCreateTournament,
   onUpdateTournament,
   onDeleteTournament,
+  onUpdateEventDays,
 }) => {
   const isAdmin = currentUserRole === 'ADMIN';
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingTournament, setEditingTournament] = useState<Tournament | null>(null);
+  const [eventDaysTournament, setEventDaysTournament] = useState<Tournament | null>(null);
 
   // Form fields
   const [name, setName] = useState('');
@@ -270,8 +274,19 @@ export const TournamentsManager: React.FC<TournamentsManagerProps> = ({
                 </div>
               </div>
 
-              {/* Botón de Selección */}
-              <div>
+              {/* Botones de Acción */}
+              <div className="space-y-2">
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setEventDaysTournament(tournament)}
+                    className="w-full py-1.5 px-3 text-center text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Calendar className="w-3.5 h-3.5 text-red-600" />
+                    <span>Precios según Días del Evento ({(tournament.eventDays || []).length || 1} jornadas)</span>
+                  </button>
+                )}
+
                 {isActive ? (
                   <div className="w-full py-2 px-3 text-center text-xs font-semibold text-emerald-800 bg-emerald-50 rounded-lg border border-emerald-200">
                     Controlando actualmente este torneo
@@ -520,6 +535,16 @@ export const TournamentsManager: React.FC<TournamentsManagerProps> = ({
             </form>
           </div>
         </div>
+      )}
+      {eventDaysTournament && onUpdateEventDays && (
+        <EventDaysPricingModal
+          isOpen={!!eventDaysTournament}
+          tournament={eventDaysTournament}
+          onClose={() => setEventDaysTournament(null)}
+          onSaveDays={(tId, days) => {
+            onUpdateEventDays(tId, days);
+          }}
+        />
       )}
     </div>
   );

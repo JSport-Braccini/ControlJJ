@@ -1,0 +1,124 @@
+{
+  "entities": {
+    "Tournament": {
+      "title": "Tournament",
+      "description": "Campeonato o evento deportivo gestionado",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "edition": { "type": "string" },
+        "category": { "type": "string" },
+        "venue": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "PAUSED", "FINISHED"] },
+        "eventDays": { "type": "array" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "date", "status"]
+    },
+    "TournamentState": {
+      "title": "TournamentState",
+      "description": "Estado transaccional en tiempo real del torneo (jugadores, aforo, ventas, gastos, tickets digitales)",
+      "type": "object",
+      "properties": {
+        "tournamentId": { "type": "string" },
+        "players": { "type": "array" },
+        "spectatorTiers": { "type": "array" },
+        "spectatorEntries": { "type": "array" },
+        "beverages": { "type": "array" },
+        "beverageSales": { "type": "array" },
+        "expenses": { "type": "array" },
+        "digitalTickets": { "type": "array" },
+        "scanHistory": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["tournamentId"]
+    },
+    "DigitalTicket": {
+      "title": "DigitalTicket",
+      "description": "Boleto digital QR comprado por la web o vendido en taquilla",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tournamentId": { "type": "string" },
+        "qrCode": { "type": "string" },
+        "ticketType": { "type": "string" },
+        "label": { "type": "string" },
+        "eventDay": { "type": "string" },
+        "buyerName": { "type": "string" },
+        "buyerPhone": { "type": "string" },
+        "buyerDni": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unitPrice": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "paymentStatus": { "type": "string", "enum": ["PAID", "RESERVED_UNPAID"] },
+        "paymentMethod": { "type": "string", "enum": ["YAPE", "PLIN", "TRANSFER", "EFECTIVO_PUERTA"] },
+        "voucherUrl": { "type": "string" },
+        "channel": { "type": "string", "enum": ["WEB", "VENUE"] },
+        "assisted": { "type": "boolean" },
+        "checkInTime": { "type": "string" },
+        "paidAtDoor": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "tournamentId", "qrCode", "totalAmount", "paymentStatus", "channel"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "Configuraciones globales del sistema y métodos de pago",
+      "type": "object",
+      "properties": {
+        "systemName": { "type": "string" },
+        "tagline": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "primaryColor": { "type": "string" },
+        "accentColor": { "type": "string" },
+        "yapePhone": { "type": "string" },
+        "yapeHolder": { "type": "string" },
+        "plinPhone": { "type": "string" },
+        "plinHolder": { "type": "string" },
+        "bankAccount": { "type": "string" },
+        "bankName": { "type": "string" },
+        "bankHolder": { "type": "string" }
+      },
+      "required": ["systemName"]
+    },
+    "AppUser": {
+      "title": "AppUser",
+      "description": "Cuenta de usuario operador o administrador",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string" },
+        "password": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["id", "username", "role", "password"]
+    }
+  },
+  "firestore": {
+    "/system/config": {
+      "schema": { "$ref": "#/entities/SystemSettings" },
+      "description": "Configuración institucional y datos de pago"
+    },
+    "/system/state": {
+      "schema": { "$ref": "#/entities/TournamentState" },
+      "description": "Estado consolidado en la nube para sincronización en tiempo real"
+    },
+    "/tournaments/{tournamentId}": {
+      "schema": { "$ref": "#/entities/Tournament" },
+      "description": "Catálogo de torneos y fechas del evento"
+    },
+    "/digitalTickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/DigitalTicket" },
+      "description": "Registro global de boletos comprados y reservados"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/AppUser" },
+      "description": "Usuarios autorizados del sistema"
+    }
+  }
+}

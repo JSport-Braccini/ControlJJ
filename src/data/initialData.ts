@@ -19,6 +19,32 @@ export const DEFAULT_TOURNAMENT: Tournament = {
   status: 'ACTIVE',
   createdAt: '2026-11-05T08:00:00Z',
   notes: 'Fase de cuartos de final y semifinales',
+  eventDays: [
+    {
+      id: 'day-1',
+      label: 'Jornada 1 - Cuartos de Final (Viernes)',
+      date: '2026-11-06',
+      adultPrice: 10.0,
+      childPrice: 5.0,
+      vipPrice: 20.0,
+    },
+    {
+      id: 'day-2',
+      label: 'Jornada 2 - Semifinales (Sábado)',
+      date: '2026-11-07',
+      adultPrice: 12.0,
+      childPrice: 6.0,
+      vipPrice: 25.0,
+    },
+    {
+      id: 'day-3',
+      label: 'Jornada 3 - Gran Final y Premiación (Domingo)',
+      date: '2026-11-08',
+      adultPrice: 15.0,
+      childPrice: 8.0,
+      vipPrice: 30.0,
+    },
+  ],
 };
 
 export const INITIAL_PLAYERS: Player[] = [
@@ -411,6 +437,7 @@ export function createInitialTournamentState(tournament: Tournament): Tournament
         })),
     beverageSales: isDefault ? INITIAL_BEVERAGE_SALES : [],
     expenses: isDefault ? INITIAL_EXPENSES : [],
+    digitalTickets: [],
     scanHistory: [],
   };
 }

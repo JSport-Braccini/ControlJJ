@@ -160,6 +160,113 @@ export function applyAppAction(
         return nextState;
       }
 
+      // Check Digital Tickets (Web purchases or Venue tickets)
+      const dtIdx = (state.digitalTickets || []).findIndex(
+        (dt) => dt.qrCode.toUpperCase() === code
+      );
+      if (dtIdx !== -1) {
+        const ticket = { ...state.digitalTickets[dtIdx] };
+
+        if (ticket.assisted) {
+          const breakdownText = ticket.items && ticket.items.length > 0
+            ? ticket.items.map((it) => `${it.quantity}x ${it.label}`).join(', ')
+            : `${ticket.quantity}x ${ticket.label}`;
+
+          const feedback: ScanFeedback = {
+            id: `fb-${Date.now()}`,
+            status: 'duplicate',
+            category: 'ESPECTADOR',
+            title: '¡BOLETO YA FUE UTILIZADO! — Entrada Marcada',
+            message: `El boleto de ${ticket.buyerName} (${breakdownText}) ya registró su ingreso a las ${ticket.checkInTime || 'anteriormente'}.`,
+            detail: `Código: ${ticket.qrCode} · Fecha: ${ticket.eventDayLabel}`,
+            timestamp: nowTime,
+            qrCode: code,
+          };
+          state.scanHistory = [feedback, ...state.scanHistory];
+          return nextState;
+        }
+
+        if (ticket.paymentStatus === 'PAID') {
+          ticket.assisted = true;
+          ticket.checkInTime = nowTime;
+          ticket.validatedBy = registeredBy || 'Módulo Puerta';
+          state.digitalTickets[dtIdx] = ticket;
+
+          // Ensure it's counted in entries if not already
+          const alreadyRecorded = state.spectatorEntries.some((se) => se.qrCode === ticket.qrCode);
+          if (!alreadyRecorded) {
+            if (ticket.items && ticket.items.length > 0) {
+              const itemEntries = ticket.items.map((it, idx) => ({
+                id: `se-${Date.now()}-${idx}`,
+                tournamentId,
+                qrCode: ticket.qrCode,
+                ticketType: it.ticketType,
+                label: `${it.label} (${ticket.eventDayLabel})`,
+                price: it.unitPrice,
+                isChild: it.ticketType === 'NINO',
+                quantity: it.quantity,
+                totalAmount: it.subtotal,
+                timestamp: nowTime,
+                registeredBy: `Web / ${ticket.paymentMethod}`,
+              }));
+              state.spectatorEntries = [...itemEntries, ...state.spectatorEntries];
+            } else {
+              state.spectatorEntries = [
+                {
+                  id: `se-${Date.now()}`,
+                  tournamentId,
+                  qrCode: ticket.qrCode,
+                  ticketType: ticket.ticketType,
+                  label: `${ticket.label} (${ticket.eventDayLabel})`,
+                  price: ticket.unitPrice,
+                  isChild: ticket.ticketType === 'NINO',
+                  quantity: ticket.quantity,
+                  totalAmount: ticket.totalAmount,
+                  timestamp: nowTime,
+                  registeredBy: `Web / ${ticket.paymentMethod}`,
+                },
+                ...state.spectatorEntries,
+              ];
+            }
+          }
+
+          const breakdownText = ticket.items && ticket.items.length > 0
+            ? ticket.items.map((it) => `${it.quantity}x ${it.label}`).join(', ')
+            : `${ticket.quantity}x ${ticket.label}`;
+
+          const feedback: ScanFeedback = {
+            id: `fb-${Date.now()}`,
+            status: 'success',
+            category: 'ESPECTADOR',
+            title: '¡ACCESO PERMITIDO - ENTRADA PAGADA!',
+            message: `${ticket.buyerName} (${breakdownText} · Total ${ticket.quantity} personas) — Cancelado vía ${ticket.paymentMethod}. Total: S/ ${ticket.totalAmount.toFixed(2)}`,
+            detail: `DNI/Tel: ${ticket.buyerDni || ticket.buyerPhone || 'Registrado'} · Habilitado en Tribuna`,
+            timestamp: nowTime,
+            qrCode: code,
+          };
+          state.scanHistory = [feedback, ...state.scanHistory];
+          return nextState;
+        } else {
+          // RESERVED_UNPAID: Payment pending at door!
+          const breakdownText = ticket.items && ticket.items.length > 0
+            ? ticket.items.map((it) => `${it.quantity}x ${it.label}`).join(', ')
+            : `${ticket.quantity}x ${ticket.label}`;
+
+          const feedback: ScanFeedback = {
+            id: `fb-${Date.now()}`,
+            status: 'error',
+            category: 'ESPECTADOR',
+            title: '⚠️ ¡ALERTA: PAGO PENDIENTE! Entrada Separada vía Web',
+            message: `El boleto de ${ticket.buyerName} está SEPARADO y debe abonar S/ ${ticket.totalAmount.toFixed(2)} en puerta (${breakdownText} · Total ${ticket.quantity} pers.).`,
+            detail: `ID:${ticket.id}|TOTAL:${ticket.totalAmount}|BUYER:${ticket.buyerName}|QTY:${ticket.quantity}|LABEL:${ticket.label}`,
+            timestamp: nowTime,
+            qrCode: code,
+          };
+          state.scanHistory = [feedback, ...state.scanHistory];
+          return nextState;
+        }
+      }
+
       // Check Spectator Tier
       const matchedTier = state.spectatorTiers.find((t) => t.qrCode.toUpperCase() === code);
       if (matchedTier) {
@@ -426,6 +533,172 @@ export function applyAppAction(
       return nextState;
     }
 
+    // DIGITAL TICKETS (WEB & VENUE)
+    case 'CREATE_DIGITAL_TICKET': {
+      const { tournamentId, ticket } = payload;
+      const tState = nextState.statesByTournament[tournamentId];
+      if (tState) {
+        const nextTickets = [ticket, ...(tState.digitalTickets || [])];
+        let nextEntries = [...tState.spectatorEntries];
+
+        // If venue ticket sold and paid right now, record directly to entries
+        if (ticket.channel === 'VENUE' && ticket.paymentStatus === 'PAID') {
+          if (ticket.items && ticket.items.length > 0) {
+            const itemEntries = ticket.items.map((it: any, idx: number) => ({
+              id: `se-${Date.now()}-${idx}`,
+              tournamentId,
+              qrCode: ticket.qrCode,
+              ticketType: it.ticketType,
+              label: `${it.label} (${ticket.eventDayLabel})`,
+              price: it.unitPrice,
+              isChild: it.ticketType === 'NINO',
+              quantity: it.quantity,
+              totalAmount: it.subtotal,
+              timestamp: new Date().toTimeString().slice(0, 8),
+              registeredBy: `Taquilla Local (${ticket.paymentMethod})`,
+            }));
+            nextEntries = [...itemEntries, ...nextEntries];
+          } else {
+            nextEntries = [
+              {
+                id: `se-${Date.now()}`,
+                tournamentId,
+                qrCode: ticket.qrCode,
+                ticketType: ticket.ticketType,
+                label: `${ticket.label} (${ticket.eventDayLabel})`,
+                price: ticket.unitPrice,
+                isChild: ticket.ticketType === 'NINO',
+                quantity: ticket.quantity,
+                totalAmount: ticket.totalAmount,
+                timestamp: new Date().toTimeString().slice(0, 8),
+                registeredBy: `Taquilla Local (${ticket.paymentMethod})`,
+              },
+              ...nextEntries,
+            ];
+          }
+        }
+
+        nextState.statesByTournament[tournamentId] = {
+          ...tState,
+          digitalTickets: nextTickets,
+          spectatorEntries: nextEntries,
+        };
+      }
+      return nextState;
+    }
+
+    case 'CONFIRM_DOOR_PAYMENT_AND_CHECKIN': {
+      const { tournamentId, ticketId, paymentMethod = 'EFECTIVO_PUERTA', operatorName } = payload;
+      const tState = nextState.statesByTournament[tournamentId];
+      if (tState && tState.digitalTickets) {
+        const nowTime = new Date().toTimeString().slice(0, 8);
+        let confirmedTicket: any = null;
+
+        const updatedTickets = tState.digitalTickets.map((tk) => {
+          if (tk.id === ticketId) {
+            confirmedTicket = {
+              ...tk,
+              paymentStatus: 'PAID',
+              paidAtDoor: true,
+              paidAtDoorTime: nowTime,
+              paidAtDoorMethod: paymentMethod,
+              assisted: true,
+              checkInTime: nowTime,
+              validatedBy: operatorName || 'Puerta de Acceso',
+            };
+            return confirmedTicket;
+          }
+          return tk;
+        });
+
+        let nextEntries = [...tState.spectatorEntries];
+        if (confirmedTicket) {
+          if (confirmedTicket.items && confirmedTicket.items.length > 0) {
+            const doorEntries = confirmedTicket.items.map((it: any, idx: number) => ({
+              id: `se-door-${Date.now()}-${idx}`,
+              tournamentId,
+              qrCode: confirmedTicket.qrCode,
+              ticketType: it.ticketType,
+              label: `${it.label} (Cancelado en Puerta)`,
+              price: it.unitPrice,
+              isChild: it.ticketType === 'NINO',
+              quantity: it.quantity,
+              totalAmount: it.subtotal,
+              timestamp: nowTime,
+              registeredBy: `${operatorName || 'Puerta'} / Cobro ${paymentMethod}`,
+            }));
+            nextEntries = [...doorEntries, ...nextEntries];
+          } else {
+            nextEntries = [
+              {
+                id: `se-door-${Date.now()}`,
+                tournamentId,
+                qrCode: confirmedTicket.qrCode,
+                ticketType: confirmedTicket.ticketType,
+                label: `${confirmedTicket.label} (Cancelado en Puerta)`,
+                price: confirmedTicket.unitPrice,
+                isChild: confirmedTicket.ticketType === 'NINO',
+                quantity: confirmedTicket.quantity,
+                totalAmount: confirmedTicket.totalAmount,
+                timestamp: nowTime,
+                registeredBy: `${operatorName || 'Puerta'} / Cobro ${paymentMethod}`,
+              },
+              ...nextEntries,
+            ];
+          }
+        }
+
+        const feedback: ScanFeedback = {
+          id: `fb-${Date.now()}`,
+          status: 'success',
+          category: 'ESPECTADOR',
+          title: '¡PAGO COBRADO EN PUERTA E INGRESO REGISTRADO!',
+          message: `${confirmedTicket?.buyerName || 'Espectador'} abonó S/ ${(confirmedTicket?.totalAmount || 0).toFixed(2)} por ${paymentMethod}. Ingreso habilitado.`,
+          timestamp: nowTime,
+          qrCode: confirmedTicket?.qrCode || '',
+        };
+
+        nextState.statesByTournament[tournamentId] = {
+          ...tState,
+          digitalTickets: updatedTickets,
+          spectatorEntries: nextEntries,
+          scanHistory: [feedback, ...tState.scanHistory],
+        };
+      }
+      return nextState;
+    }
+
+    case 'DELETE_DIGITAL_TICKET': {
+      const { tournamentId, ticketId } = payload;
+      const tState = nextState.statesByTournament[tournamentId];
+      if (tState && tState.digitalTickets) {
+        nextState.statesByTournament[tournamentId] = {
+          ...tState,
+          digitalTickets: tState.digitalTickets.filter((tk) => tk.id !== ticketId),
+        };
+      }
+      return nextState;
+    }
+
+    case 'UPDATE_EVENT_DAYS': {
+      const { tournamentId, eventDays } = payload;
+      const tState = nextState.statesByTournament[tournamentId];
+      if (tState) {
+        const updatedTournament = {
+          ...tState.tournament,
+          eventDays,
+        };
+        nextState.tournaments = nextState.tournaments.map((t) =>
+          t.id === tournamentId ? updatedTournament : t
+        );
+        nextState.statesByTournament[tournamentId] = {
+          ...tState,
+          tournament: updatedTournament,
+        };
+      }
+      return nextState;
+    }
+
     case 'RESET_ALL_DATA_TO_ZERO': {
       const { tournamentId } = payload;
       const tState = nextState.statesByTournament[tournamentId];
@@ -445,6 +718,7 @@ export function applyAppAction(
           })),
           beverageSales: [],
           expenses: [],
+          digitalTickets: [],
           scanHistory: [],
         };
       }

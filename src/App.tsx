@@ -38,6 +38,9 @@ import { LoginModal } from './components/LoginModal';
 import { CameraQrModal } from './components/CameraQrModal';
 import { ConnectionGuideModal } from './components/ConnectionGuideModal';
 import { CorporateLogo } from './components/CorporateLogo';
+import { DigitalTicketsManager } from './components/DigitalTicketsManager';
+import { PublicTicketStore } from './components/PublicTicketStore';
+import { DigitalTicket } from './types/championship';
 
 const AUTH_STORAGE_KEY = 'copacontrol_auth_user_v2';
 
@@ -64,6 +67,7 @@ export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('resumen');
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [showGlobalCamera, setShowGlobalCamera] = useState(false);
+  const [showStoreModal, setShowStoreModal] = useState(false);
 
   const currentRole: UserRole = currentUser?.role || 'ADMIN';
   const isAdmin = currentRole === 'ADMIN';
@@ -306,6 +310,26 @@ export function App() {
     );
   }
 
+  // Portal de Compradores / Aficionados Invitados
+  if (currentUser?.role === 'INVITADO_VENTA') {
+    return (
+      <PublicTicketStore
+        tournaments={serverData.tournaments}
+        activeTournament={activeTournament}
+        activeTournamentState={activeTournamentState}
+        systemConfig={systemConfig}
+        onSelectTournament={handleSelectTournament}
+        onCreateTicket={(ticket) => {
+          sendAction('CREATE_DIGITAL_TICKET', {
+            tournamentId: activeTournament.id,
+            ticket,
+          });
+        }}
+        onBackToLogin={handleLogout}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-slate-900 font-sans w-full max-w-full overflow-x-hidden">
       {/* Top Bar Principal (Azul Marino Profundo #0A192F con borde Rojo #DC2626) */}
@@ -432,6 +456,18 @@ export function App() {
               >
                 <Ticket className="w-4 h-4" />
                 Espectadores
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('boletos')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  activeTab === 'boletos'
+                    ? 'bg-red-600 text-white font-bold'
+                    : 'text-emerald-300 hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                <Ticket className="w-4 h-4 text-emerald-400" />
+                Boletos Web ({(activeTournamentState.digitalTickets || []).length})
               </button>
               <button
                 type="button"
@@ -600,6 +636,7 @@ export function App() {
             {(
               [
                 ['resumen', 'Principal', LayoutDashboard],
+                ['boletos', `Boletos (${(activeTournamentState.digitalTickets || []).length})`, Ticket],
                 ['jugadores', 'Jugadores', Users],
                 ['espectadores', 'Entradas', Ticket],
                 ['bebidas', 'Bebidas', CupSoda],
@@ -679,6 +716,30 @@ export function App() {
                 beverages={activeTournamentState.beverages}
                 beverageSales={activeTournamentState.beverageSales}
                 expenses={activeTournamentState.expenses || []}
+                digitalTickets={activeTournamentState.digitalTickets || []}
+              />
+            )}
+
+            {activeTab === 'boletos' && (
+              <DigitalTicketsManager
+                tournament={activeTournament}
+                tournamentState={activeTournamentState}
+                systemConfig={systemConfig}
+                onConfirmDoorPayment={(ticketId, paymentMethod) => {
+                  sendAction('CONFIRM_DOOR_PAYMENT_AND_CHECKIN', {
+                    tournamentId: activeTournament.id,
+                    ticketId,
+                    paymentMethod,
+                    registeredBy: currentUser.displayName,
+                  });
+                }}
+                onDeleteTicket={(ticketId) => {
+                  sendAction('DELETE_DIGITAL_TICKET', {
+                    tournamentId: activeTournament.id,
+                    ticketId,
+                  });
+                }}
+                onOpenStoreModal={() => setShowStoreModal(true)}
               />
             )}
 
@@ -697,6 +758,8 @@ export function App() {
             {activeTab === 'espectadores' && (
               <SpectatorsManager
                 tournamentId={activeTournament.id}
+                tournament={activeTournament}
+                systemConfig={systemConfig}
                 tiers={activeTournamentState.spectatorTiers}
                 entries={activeTournamentState.spectatorEntries}
                 currentUserRole={currentRole}
@@ -704,6 +767,12 @@ export function App() {
                 onUpdateTierPrice={handleUpdateTierPrice}
                 onAddTicketTier={handleAddTicketTier}
                 onDeleteTicketTier={handleDeleteTicketTier}
+                onSellVenueTicket={(ticket) => {
+                  sendAction('CREATE_DIGITAL_TICKET', {
+                    tournamentId: activeTournament.id,
+                    ticket,
+                  });
+                }}
               />
             )}
 
@@ -730,6 +799,12 @@ export function App() {
                 onCreateTournament={handleCreateTournament}
                 onUpdateTournament={handleUpdateTournament}
                 onDeleteTournament={handleDeleteTournament}
+                onUpdateEventDays={(tournamentId, eventDays) => {
+                  sendAction('UPDATE_EVENT_DAYS', {
+                    tournamentId,
+                    eventDays,
+                  });
+                }}
               />
             )}
 
@@ -762,6 +837,8 @@ export function App() {
         {currentRole === 'CONTROL_ESPECTADORES' && (
           <SpectatorsManager
             tournamentId={activeTournament.id}
+            tournament={activeTournament}
+            systemConfig={systemConfig}
             tiers={activeTournamentState.spectatorTiers}
             entries={activeTournamentState.spectatorEntries}
             currentUserRole={currentRole}
@@ -769,6 +846,12 @@ export function App() {
             onUpdateTierPrice={handleUpdateTierPrice}
             onAddTicketTier={handleAddTicketTier}
             onDeleteTicketTier={handleDeleteTicketTier}
+            onSellVenueTicket={(ticket) => {
+              sendAction('CREATE_DIGITAL_TICKET', {
+                tournamentId: activeTournament.id,
+                ticket,
+              });
+            }}
           />
         )}
 
@@ -834,6 +917,44 @@ export function App() {
         customWsUrl={customWsUrl}
         onSaveCustomWsUrl={setCustomWsUrl}
       />
+
+      {/* Modal de Tienda de Boletos Online / Reserva (Modo Operador / Demo) */}
+      {showStoreModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+          <div className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col border border-slate-700">
+            <div className="p-3 bg-[#0A192F] text-white flex items-center justify-between border-b border-red-600">
+              <span className="font-bold text-sm flex items-center gap-2">
+                <Ticket className="w-4 h-4 text-emerald-400" />
+                Portal de Venta Online y Reserva de Boletos
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowStoreModal(false)}
+                className="text-slate-400 hover:text-white px-2.5 py-1 rounded-md text-xs font-bold hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                ✕ Cerrar
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 sm:p-4 bg-slate-50">
+              <PublicTicketStore
+                tournaments={serverData.tournaments}
+                activeTournament={activeTournament}
+                activeTournamentState={activeTournamentState}
+                systemConfig={systemConfig}
+                onSelectTournament={handleSelectTournament}
+                onCreateTicket={(ticket) => {
+                  sendAction('CREATE_DIGITAL_TICKET', {
+                    tournamentId: activeTournament.id,
+                    ticket,
+                  });
+                  setShowStoreModal(false);
+                }}
+                onBackToLogin={() => setShowStoreModal(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer Corporativo Oficial */}
       <footer className="no-print border-t border-slate-200 bg-white py-3 px-3 sm:px-6 mt-auto w-full max-w-full">

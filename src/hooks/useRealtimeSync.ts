@@ -3,8 +3,11 @@ import { AppServerData, TournamentState } from '../types/championship';
 import { DEFAULT_TOURNAMENT, createInitialTournamentState } from '../data/initialData';
 import { DEFAULT_SYSTEM_CONFIG, INITIAL_AUTH_USERS } from '../data/authUsers';
 import { applyAppAction } from '../utils/actionReducer';
+import { db } from '../firebase/config';
+import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
+import { handleFirestoreError, OperationType } from '../firebase/errorHandler';
 
-const STORAGE_KEY = 'jj_copacontrol_state_v2';
+const STORAGE_KEY = 'jj_copacontrol_state_v3';
 const CUSTOM_WS_KEY = 'jj_custom_ws_url';
 
 function loadInitialState(): AppServerData {
@@ -43,20 +46,19 @@ function loadInitialState(): AppServerData {
 export function useRealtimeSync() {
   const [serverData, setServerData] = useState<AppServerData>(loadInitialState);
   const [isConnected, setIsConnected] = useState(false);
-  const [isVercelOrLocal, setIsVercelOrLocal] = useState(() => {
-    return typeof window !== 'undefined' && window.location.hostname.endsWith('vercel.app');
-  });
+  const [isCloudSynced, setIsCloudSynced] = useState(false);
+  const [isVercelOrLocal, setIsVercelOrLocal] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string>(() => new Date().toTimeString().slice(0, 8));
   const [customWsUrl, setCustomWsUrlState] = useState<string>(() => {
     return localStorage.getItem(CUSTOM_WS_KEY) || import.meta.env.VITE_WS_URL || '';
   });
 
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
-  const connectionAttemptsRef = useRef<number>(0);
+  const isUpdatingFromCloudRef = useRef<boolean>(false);
+  const hasInitializedCloudRef = useRef<boolean>(false);
 
-  // Cross-tab synchronization via BroadcastChannel (works everywhere, including Vercel)
+  // Cross-tab synchronization via BroadcastChannel
   useEffect(() => {
     try {
       if (typeof BroadcastChannel !== 'undefined') {
@@ -88,118 +90,141 @@ export function useRealtimeSync() {
     }
   };
 
-  const connect = useCallback(() => {
-    const isVercelHost = window.location.hostname.endsWith('vercel.app');
+  // 1. FIREBASE FIRESTORE REAL-TIME SYNCHRONIZATION (Authoritative Cloud Source of Truth)
+  useEffect(() => {
+    const stateDocRef = doc(db, 'system', 'state');
 
-    // If on Vercel and no custom WS URL is configured, Vercel cannot host WebSockets directly.
-    if (isVercelHost && !customWsUrl) {
-      setIsVercelOrLocal(true);
-      setIsConnected(false);
-      return;
-    }
+    // Subscribe to Firestore changes in real-time
+    const unsubscribe = onSnapshot(
+      stateDocRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const cloudData = snapshot.data() as AppServerData;
+          if (
+            cloudData &&
+            cloudData.tournaments &&
+            Array.isArray(cloudData.tournaments) &&
+            cloudData.statesByTournament
+          ) {
+            isUpdatingFromCloudRef.current = true;
+            setServerData(cloudData);
+            saveToStorage(cloudData);
+            setIsConnected(true);
+            setIsCloudSynced(true);
+            setLastSyncTime(new Date().toTimeString().slice(0, 8));
+            setTimeout(() => {
+              isUpdatingFromCloudRef.current = false;
+            }, 100);
+          }
+        } else {
+          // If Firestore is empty on first deployment, seed it with current initial state
+          if (!hasInitializedCloudRef.current) {
+            hasInitializedCloudRef.current = true;
+            const seed = loadInitialState();
+            setDoc(stateDocRef, seed)
+              .then(() => {
+                setIsConnected(true);
+                setIsCloudSynced(true);
+              })
+              .catch((err) => {
+                handleFirestoreError(err, OperationType.WRITE, 'system/state');
+              });
+          }
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'system/state');
+        setIsCloudSynced(false);
+      }
+    );
 
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // 2. WEBSOCKET FALLBACK & SECONDARY SYNC
+  const connectWs = useCallback(() => {
     try {
       let targetWsUrl = customWsUrl;
-      if (!targetWsUrl) {
+      if (!targetWsUrl && typeof window !== 'undefined') {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         targetWsUrl = `${protocol}//${window.location.host}`;
       }
 
-      const ws = new WebSocket(targetWsUrl);
+      if (targetWsUrl && !window.location.hostname.endsWith('vercel.app')) {
+        const ws = new WebSocket(targetWsUrl);
 
-      ws.onopen = () => {
-        setIsConnected(true);
-        setIsVercelOrLocal(false);
-        connectionAttemptsRef.current = 0;
-        setLastSyncTime(new Date().toTimeString().slice(0, 8));
-      };
+        ws.onopen = () => {
+          setIsConnected(true);
+        };
 
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          if (message.type === 'STATE_SYNC') {
-            setServerData(message.payload);
-            saveToStorage(message.payload);
-            setLastSyncTime(new Date().toTimeString().slice(0, 8));
-          } else if (message.type === 'PRESENCE_UPDATE') {
-            setServerData((prev) => ({
-              ...prev,
-              connectedClientsCount: message.payload.count,
-            }));
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            if (message.type === 'STATE_SYNC' && message.payload && !isCloudSynced) {
+              setServerData(message.payload);
+              saveToStorage(message.payload);
+              setLastSyncTime(new Date().toTimeString().slice(0, 8));
+            }
+          } catch (err) {
+            console.error('Error parsing WS message:', err);
           }
-        } catch (err) {
-          console.error('Error parsing WS frame:', err);
-        }
-      };
+        };
 
-      ws.onclose = () => {
-        setIsConnected(false);
-        connectionAttemptsRef.current += 1;
+        ws.onclose = () => {
+          wsRef.current = null;
+        };
 
-        // If on Vercel or after 3 failed attempts, enable local/Vercel resilient mode
-        if (isVercelHost || connectionAttemptsRef.current >= 3) {
-          setIsVercelOrLocal(true);
-        }
+        ws.onerror = () => {
+          wsRef.current = null;
+        };
 
-        // Reconnect after delay only if not explicitly on Vercel without custom URL
-        if (!isVercelHost || customWsUrl) {
-          if (!reconnectTimeoutRef.current) {
-            reconnectTimeoutRef.current = setTimeout(() => {
-              reconnectTimeoutRef.current = null;
-              connect();
-            }, 5000);
-          }
-        }
-      };
-
-      ws.onerror = () => {
-        setIsConnected(false);
-        if (isVercelHost || connectionAttemptsRef.current >= 2) {
-          setIsVercelOrLocal(true);
-        }
-      };
-
-      wsRef.current = ws;
-    } catch (err) {
-      console.warn('Could not establish WebSocket connection, falling back to local engine:', err);
-      setIsVercelOrLocal(true);
-      setIsConnected(false);
+        wsRef.current = ws;
+      }
+    } catch {
+      // WS fallback failure is non-fatal since Firestore handles sync
     }
-  }, [customWsUrl]);
+  }, [customWsUrl, isCloudSynced]);
 
   useEffect(() => {
-    connect();
-
+    connectWs();
     return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
+      if (wsRef.current) wsRef.current.close();
     };
-  }, [connect]);
+  }, [connectWs]);
 
+  // MUTATION DISPATCHER
   const sendAction = useCallback(
     (type: string, payload: unknown) => {
-      // If WebSocket is open and connected to server, send across cloud
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type, payload }));
-      } else {
-        // Local Reducer Execution (Guarantees 100% functionality on Vercel or offline!)
-        setServerData((prev) => {
-          const next = applyAppAction(prev, { type, payload: payload as any });
-          saveToStorage(next);
+      setServerData((prev) => {
+        const next = applyAppAction(prev, { type, payload: payload as any });
+        saveToStorage(next);
 
-          // Broadcast to other tabs in the same browser
-          if (channelRef.current) {
-            channelRef.current.postMessage({ type: 'STATE_SYNC', payload: next });
+        // Broadcast to other browser tabs
+        if (channelRef.current) {
+          channelRef.current.postMessage({ type: 'STATE_SYNC', payload: next });
+        }
+
+        // Send via WebSocket if open
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          try {
+            wsRef.current.send(JSON.stringify({ type, payload }));
+          } catch {
+            // ignore
           }
+        }
 
-          return next;
+        // CRITICAL: Synchronize directly with Firestore in the cloud
+        const stateDocRef = doc(db, 'system', 'state');
+        setDoc(stateDocRef, next, { merge: true }).catch((err) => {
+          handleFirestoreError(err, OperationType.UPDATE, 'system/state');
         });
-        setLastSyncTime(new Date().toTimeString().slice(0, 8));
-      }
+
+        return next;
+      });
+
+      setLastSyncTime(new Date().toTimeString().slice(0, 8));
     },
     []
   );
@@ -212,9 +237,6 @@ export function useRealtimeSync() {
       localStorage.removeItem(CUSTOM_WS_KEY);
     }
     setCustomWsUrlState(clean);
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
   };
 
   const activeTournamentState: TournamentState =
@@ -227,7 +249,8 @@ export function useRealtimeSync() {
     users: serverData.users,
     activeTournamentState,
     activeTournament: activeTournamentState.tournament,
-    isConnected,
+    isConnected: isConnected || isCloudSynced,
+    isCloudSynced,
     isVercelOrLocal,
     lastSyncTime,
     customWsUrl,
