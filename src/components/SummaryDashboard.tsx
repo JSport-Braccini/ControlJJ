@@ -21,6 +21,10 @@ import {
   X,
   AlertTriangle,
   UserCheck,
+  Camera,
+  ScanLine,
+  Zap,
+  Search,
 } from 'lucide-react';
 import {
   Tournament,
@@ -47,6 +51,7 @@ interface SummaryDashboardProps {
   currentUserName: string;
   connectedClientsCount?: number;
   onQuickScan?: (qrCode: string, quantity?: number) => void;
+  onOpenGlobalCamera?: () => void;
   onGoToPlayers: () => void;
   onGoToSpectators: () => void;
   onGoToBeverages: () => void;
@@ -68,6 +73,8 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
   currentUserRole,
   currentUserName,
   connectedClientsCount = 1,
+  onQuickScan,
+  onOpenGlobalCamera,
   onGoToPlayers,
   onGoToSpectators,
   onGoToBeverages,
@@ -78,6 +85,18 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
 }) => {
   const [showResetModal, setShowResetModal] = useState(false);
   const [confirmPhrase, setConfirmPhrase] = useState('');
+  const [universalScanCode, setUniversalScanCode] = useState('');
+  const [universalScanQty, setUniversalScanQty] = useState(1);
+
+  const handleUniversalScanSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = universalScanCode.trim();
+    if (!trimmed) return;
+    if (onQuickScan) {
+      onQuickScan(trimmed, universalScanQty);
+    }
+    setUniversalScanCode('');
+  };
 
   const isAdmin = currentUserRole === 'ADMIN';
   const isPlayersUser = currentUserRole === 'CONTROL_JUGADORES';
@@ -230,6 +249,104 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
         </div>
       )}
 
+      {/* CENTRO DE ESCANEO UNIVERSAL — PANTALLA PRINCIPAL ADMIN */}
+      {isAdmin && (
+        <div className="bg-gradient-to-br from-[#0A192F] via-[#112240] to-[#0A192F] border-2 border-red-500/30 rounded-2xl p-4 sm:p-5 text-white shadow-xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 -mt-6 -mr-6 w-32 h-32 bg-red-600/10 rounded-full blur-2xl pointer-events-none" />
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                  <ScanLine className="w-3 h-3" />
+                  Escáner Universal Central
+                </span>
+                <span className="text-[11px] text-slate-300">
+                  Escanea todo: Asistencia · Entradas Web & Locales · Bebidas
+                </span>
+              </div>
+              <h3 className="text-lg sm:text-xl font-bold tracking-tight text-white font-display">
+                Control de Acceso y Ventas en Tiempo Real
+              </h3>
+              <p className="text-xs text-slate-300 max-w-xl">
+                Apunta la cámara o conecta una pistola lectora USB/Bluetooth. El sistema detecta automáticamente si es jugador, boleto pagado, entrada separada para cobrar en puerta o venta de bebida, bloqueando ingresos duplicados.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
+              {onOpenGlobalCamera && (
+                <button
+                  type="button"
+                  onClick={onOpenGlobalCamera}
+                  className="px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-red-950/50 hover:shadow-xl transition-all cursor-pointer whitespace-nowrap"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>Escanear con Cámara</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Formulario para pistola lectora o código manual */}
+          <form onSubmit={handleUniversalScanSubmit} className="mt-4 pt-3.5 border-t border-slate-700/60 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={universalScanCode}
+                onChange={(e) => setUniversalScanCode(e.target.value)}
+                placeholder="Pistolear código QR o escribir manualmente (ej. TK-WEB-..., PLY-..., BEV-...) y pulsar Enter"
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-900/90 border border-slate-700 focus:border-red-500 rounded-xl text-xs text-white placeholder-slate-400 focus:outline-hidden transition-colors"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 bg-slate-900/90 border border-slate-700 px-3 py-1.5 rounded-xl text-xs text-slate-300">
+                <span className="text-[11px] text-slate-400">Cant:</span>
+                <select
+                  value={universalScanQty}
+                  onChange={(e) => setUniversalScanQty(Number(e.target.value))}
+                  className="bg-transparent text-white font-bold font-mono focus:outline-hidden cursor-pointer"
+                >
+                  {[1, 2, 3, 4, 5, 10].map((n) => (
+                    <option key={n} value={n} className="bg-slate-900 text-white">
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                type="submit"
+                disabled={!universalScanCode.trim()}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-white disabled:opacity-40 text-slate-900 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0"
+              >
+                <Zap className="w-3.5 h-3.5 text-red-600" />
+                <span>Validar QR</span>
+              </button>
+            </div>
+          </form>
+
+          {/* Badges de capacidades universales */}
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-300">
+            <span className="inline-flex items-center gap-1 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Asistencia Jugadores
+            </span>
+            <span className="inline-flex items-center gap-1 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" /> Entradas Web & Físicas
+            </span>
+            <span className="inline-flex items-center gap-1 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Cobro en Puerta de Boletos Separados
+            </span>
+            <span className="inline-flex items-center gap-1 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-400" /> Bloqueo Inmediato de Duplicados
+            </span>
+            <span className="inline-flex items-center gap-1 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60">
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-400" /> Venta de Bebidas
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* MENÚ PRINCIPAL CON ÍCONOS PARA INGRESAR DIRECTAMENTE */}
       <div>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200/90">
@@ -264,10 +381,10 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
                     setConfirmPhrase('');
                     setShowResetModal(true);
                   }}
-                  className="px-3.5 py-2 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl cursor-pointer flex items-center gap-1.5 shadow-2xs hover:shadow-xs transition-all"
+                  className="px-3.5 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 border border-red-700 rounded-xl cursor-pointer flex items-center gap-1.5 shadow-sm transition-all"
                   title="Restablecer todos los contadores del sistema a cero"
                 >
-                  <RotateCcw className="w-3.5 h-3.5 text-red-600" />
+                  <RotateCcw className="w-3.5 h-3.5 text-white" />
                   <span>Restablecer a Cero</span>
                 </button>
               </>
@@ -359,7 +476,7 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
                 Gastos Generales
               </h3>
               <p className="text-[10px] sm:text-xs text-rose-600 mt-0.5 font-mono-tabular font-semibold truncate">
-                S/ {totalExpenses.toFixed(0)} ({expenses.length} reg.)
+                S/ {totalExpenses.toFixed(0)} ({(expenses || []).length} reg.)
               </p>
             </div>
           </button>
@@ -483,7 +600,7 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
                 </div>
               </div>
               <div className="mt-2.5 pt-2 border-t border-slate-100 text-[11px] text-slate-600 font-mono-tabular truncate">
-                {expenses.length} egresos contabilizados
+                {(expenses || []).length} egresos contabilizados
               </div>
             </div>
 
@@ -638,7 +755,7 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
                   </div>
                 ))}
                 <div className="p-3.5 bg-slate-50 flex items-center justify-between text-xs font-bold text-slate-900">
-                  <span>Total Bebidas ({totalBeverageUnits} uds.)</span>
+                  <span>Total Bebidas ({totalBeverageUnits} unidades)</span>
                   <span className="text-emerald-700 font-mono-tabular">S/ {totalBeverageRevenue.toFixed(2)}</span>
                 </div>
               </div>
@@ -878,7 +995,7 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
                 <CupSoda className="w-4 h-4 text-slate-400" />
               </div>
               <div className="mt-2 text-2xl font-bold font-mono-tabular text-slate-900">
-                {totalBeverageUnits} uds.
+                {totalBeverageUnits} unidades
               </div>
               <div className="mt-1 text-xs text-slate-500 font-mono-tabular">
                 Despachadas en puntos de hidratación
@@ -890,7 +1007,7 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
                 Stock Total Disponible
               </div>
               <div className="mt-2 text-2xl font-bold font-mono-tabular text-slate-900">
-                {beverages.reduce((a, b) => a + b.stock, 0)} uds.
+                {beverages.reduce((a, b) => a + b.stock, 0)} unidades
               </div>
               <div className="mt-1 text-xs text-slate-500">
                 Inventario remanente en almacén
@@ -902,8 +1019,8 @@ export const SummaryDashboard: React.FC<SummaryDashboardProps> = ({
 
       {/* Modal de Confirmación: Restablecer Sistema a Cero */}
       {showResetModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 space-y-4 border border-slate-200 shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 space-y-4 border border-slate-200 shadow-2xl max-h-[92vh] overflow-y-auto my-auto">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2.5 text-red-600">
                 <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center shrink-0">

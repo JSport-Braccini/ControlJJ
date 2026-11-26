@@ -58,7 +58,18 @@
   .no-print {
     display: none !important;
   }
-  body {
+  html, body, #root {
     background-color: #FFFFFF !important;
+    overflow: visible !important;
+    max-width: none !important;
+    width: auto !important;
+    height: auto !important;
+  }
+  .print-reset-modal {
+    position: static !important;
+    inset: auto !important;
+    background: transparent !important;
+    padding: 0 !important;
+    overflow: visible !important;
   }
 }

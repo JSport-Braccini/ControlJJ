@@ -182,7 +182,7 @@ export const BeveragesManager: React.FC<BeveragesManagerProps> = ({
             <TrendingUp className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="mt-1.5 text-2xl sm:text-3xl font-bold font-mono-tabular text-slate-900">
-            {totalUnitsSold} uds.
+            {totalUnitsSold} unidades
           </div>
           <div className="mt-0.5 text-[11px] text-slate-400">
             Despachadas por QR
@@ -195,7 +195,7 @@ export const BeveragesManager: React.FC<BeveragesManagerProps> = ({
             <Package className="w-4 h-4 text-slate-400" />
           </div>
           <div className="mt-1.5 text-2xl sm:text-3xl font-bold font-mono-tabular text-slate-900">
-            {totalStock} uds.
+            {totalStock} unidades
           </div>
           <div className="mt-0.5 text-[11px] text-slate-400">
             Inventario disponible
@@ -361,7 +361,7 @@ export const BeveragesManager: React.FC<BeveragesManagerProps> = ({
                         bev.stock <= 5 ? 'text-red-600' : 'text-slate-900'
                       }`}
                     >
-                      {bev.stock} uds.
+                      {bev.stock} unidades
                     </span>
                   </div>
                 </div>
@@ -515,7 +515,7 @@ export const BeveragesManager: React.FC<BeveragesManagerProps> = ({
                       S/ {bev.price.toFixed(2)}
                     </td>
                     <td className="py-3 px-4 text-right font-mono-tabular text-slate-600">
-                      {bev.stock} unid.
+                      {bev.stock} unidades
                     </td>
                     <td className="py-3 px-4 text-right font-mono-tabular font-bold text-slate-900 text-base">
                       {bev.soldCount}
@@ -533,10 +533,10 @@ export const BeveragesManager: React.FC<BeveragesManagerProps> = ({
                   Totales de Bebidas
                 </td>
                 <td className="py-3 px-4 text-right font-mono-tabular text-slate-700">
-                  {totalStock} unid.
+                  {totalStock} unidades
                 </td>
                 <td className="py-3 px-4 text-right font-mono-tabular text-base text-slate-900">
-                  {totalUnitsSold} unid.
+                  {totalUnitsSold} unidades
                 </td>
                 <td className="py-3 px-5 text-right font-mono-tabular text-base text-emerald-700">
                   S/ {totalRevenue.toFixed(2)}
@@ -549,8 +549,8 @@ export const BeveragesManager: React.FC<BeveragesManagerProps> = ({
 
       {/* Modal Editar Bebida (Solo Administrador) */}
       {editingBev && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl max-h-[92vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-900">Editar Bebida</h3>
               <button
@@ -638,8 +638,8 @@ export const BeveragesManager: React.FC<BeveragesManagerProps> = ({
 
       {/* Modal Crear Bebida (Solo Administrador) */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl max-h-[92vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Plus className="w-5 h-5 text-slate-900" />

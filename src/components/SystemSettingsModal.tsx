@@ -14,12 +14,14 @@ import { CorporateLogo } from './CorporateLogo';
 interface SystemSettingsModalProps {
   config: SystemConfig;
   onUpdateConfig: (newConfig: Partial<SystemConfig>) => void;
+  onResetAllData?: () => void;
   onClose: () => void;
 }
 
 export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
   config,
   onUpdateConfig,
+  onResetAllData,
   onClose,
 }) => {
   const [systemName, setSystemName] = useState(config.systemName);
@@ -32,6 +34,7 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
   const [plinHolder, setPlinHolder] = useState(config.plinHolder || 'Organización JJ Deportes');
   const [bankName, setBankName] = useState(config.bankName || 'BCP Banco de Crédito');
   const [bankAccount, setBankAccount] = useState(config.bankAccount || '193-98234812-0-45');
+  const [bankCci, setBankCci] = useState(config.bankCci || '002-193-0098234812045-12');
   const [bankHolder, setBankHolder] = useState(config.bankHolder || 'Organización JJ Deportes EIRL');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -66,6 +69,7 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
       plinHolder: plinHolder.trim(),
       bankName: bankName.trim(),
       bankAccount: bankAccount.trim(),
+      bankCci: bankCci.trim(),
       bankHolder: bankHolder.trim(),
     });
     onClose();
@@ -78,8 +82,8 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#0A192F]/80 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-[#0A192F]/80 backdrop-blur-xs flex items-start sm:items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col my-auto">
         {/* Cabecera Modal */}
         <div className="bg-[#0A192F] text-white p-5 flex items-center justify-between border-b-2 border-red-600">
           <div className="flex items-center gap-3">
@@ -104,7 +108,7 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-4 overflow-y-auto">
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
               Nombre Oficial del Sistema *
@@ -265,31 +269,89 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                 />
               </div>
 
-              <div className="sm:col-span-2 space-y-1">
-                <label className="block text-[11px] font-semibold text-slate-800">
-                  Banco y Número de Cuenta:
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="text"
-                    value={bankName}
-                    onChange={(e) => setBankName(e.target.value)}
-                    placeholder="BCP Banco de Crédito"
-                    className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
-                  />
-                  <input
-                    type="text"
-                    value={bankAccount}
-                    onChange={(e) => setBankAccount(e.target.value)}
-                    placeholder="193-98234812-0-45"
-                    className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-mono"
-                  />
+              <div className="sm:col-span-2 space-y-2 pt-1 border-t border-slate-200">
+                <span className="block text-[11px] font-bold text-slate-800">
+                  🏦 Datos de Transferencia Bancaria Oficial (para reconocimiento de vouchers):
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-slate-600 mb-0.5 font-semibold">
+                      Nombre del Banco:
+                    </label>
+                    <input
+                      type="text"
+                      value={bankName}
+                      onChange={(e) => setBankName(e.target.value)}
+                      placeholder="BCP Banco de Crédito"
+                      className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-600 mb-0.5 font-semibold">
+                      Titular Oficial de la Cuenta:
+                    </label>
+                    <input
+                      type="text"
+                      value={bankHolder}
+                      onChange={(e) => setBankHolder(e.target.value)}
+                      placeholder="Organización JJ Deportes EIRL"
+                      className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-600 mb-0.5 font-semibold">
+                      Número de Cuenta:
+                    </label>
+                    <input
+                      type="text"
+                      value={bankAccount}
+                      onChange={(e) => setBankAccount(e.target.value)}
+                      placeholder="193-98234812-0-45"
+                      className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-600 mb-0.5 font-semibold">
+                      CCI Interbancario:
+                    </label>
+                    <input
+                      type="text"
+                      value={bankCci}
+                      onChange={(e) => setBankCci(e.target.value)}
+                      placeholder="002-193-0098234812045-12"
+                      className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-mono"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="pt-2 flex items-center justify-between border-t border-slate-100">
+          {onResetAllData && (
+            <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <span className="block text-xs font-bold text-red-900">
+                  Reiniciar Contadores del Torneo
+                </span>
+                <span className="block text-[11px] text-red-700">
+                  Borra asistencias, boletos, ventas y gastos del torneo activo a cero.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onResetAllData();
+                }}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg cursor-pointer shrink-0 shadow-xs"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Restablecer a Cero</span>
+              </button>
+            </div>
+          )}
+
+          <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100">
             <button
               type="button"
               onClick={handleResetDefaults}

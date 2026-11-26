@@ -14,6 +14,7 @@ import {
   Award,
   ShieldCheck,
   CheckCircle2,
+  Loader2,
 } from 'lucide-react';
 import {
   Tournament,
@@ -25,6 +26,7 @@ import {
   ExpenseItem,
   DigitalTicket,
 } from '../types/championship';
+import { printOrDownloadGeneralReportPdf } from '../utils/printHelper';
 
 interface GeneralReportProps {
   tournament: Tournament;
@@ -47,6 +49,9 @@ export const GeneralReport: React.FC<GeneralReportProps> = ({
   expenses = [],
   digitalTickets = [],
 }) => {
+  const [isPrinting, setIsPrinting] = React.useState(false);
+  const [printDone, setPrintDone] = React.useState(false);
+
   // Ingresos
   const totalTicketRevenue = spectatorEntries.reduce((acc, e) => acc + e.totalAmount, 0);
   const totalBeverageRevenue = beverages.reduce((acc, b) => acc + b.soldCount * b.price, 0);
@@ -145,7 +150,28 @@ export const GeneralReport: React.FC<GeneralReportProps> = ({
     .reduce((acc, t) => acc + t.totalAmount, 0);
 
   const handlePrint = () => {
-    window.print();
+    setIsPrinting(true);
+    try {
+      printOrDownloadGeneralReportPdf({
+        tournament,
+        players,
+        spectatorEntries,
+        beverages,
+        expenses,
+        digitalTickets: dTickets,
+      });
+      setPrintDone(true);
+      setTimeout(() => setPrintDone(false), 3000);
+    } catch (err) {
+      console.warn('Error generando reporte PDF:', err);
+      try {
+        window.print();
+      } catch {
+        // ignore
+      }
+    } finally {
+      setIsPrinting(false);
+    }
   };
 
   const handleExportCsv = () => {
@@ -226,7 +252,7 @@ export const GeneralReport: React.FC<GeneralReportProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0 no-print">
           <button
             type="button"
             onClick={handleExportCsv}
@@ -238,10 +264,23 @@ export const GeneralReport: React.FC<GeneralReportProps> = ({
           <button
             type="button"
             onClick={handlePrint}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer min-h-[40px]"
+            disabled={isPrinting}
+            className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer min-h-[40px] ${
+              printDone
+                ? 'bg-emerald-600 text-white'
+                : 'bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white'
+            }`}
           >
-            <Printer className="w-4 h-4 text-white" />
-            Imprimir Reporte
+            {isPrinting ? (
+              <Loader2 className="w-4 h-4 text-white animate-spin" />
+            ) : printDone ? (
+              <CheckCircle2 className="w-4 h-4 text-white" />
+            ) : (
+              <Printer className="w-4 h-4 text-white" />
+            )}
+            <span>
+              {isPrinting ? 'Generando PDF...' : printDone ? 'Reporte PDF Descargado' : 'Imprimir / PDF Reporte'}
+            </span>
           </button>
         </div>
       </div>
@@ -266,7 +305,7 @@ export const GeneralReport: React.FC<GeneralReportProps> = ({
             </p>
           </div>
 
-          <div className="bg-black/30 backdrop-blur-md rounded-2xl p-4 sm:p-5 border border-white/10 flex flex-col items-start lg:items-end min-w-[240px]">
+          <div className="bg-black/30 backdrop-blur-md rounded-2xl p-4 sm:p-5 border border-white/10 flex flex-col items-start lg:items-end w-full lg:w-auto sm:min-w-[240px]">
             <span className="text-xs text-slate-300 uppercase tracking-wider font-semibold font-mono">
               Utilidad Neta (Ingresos - Gastos)
             </span>

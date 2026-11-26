@@ -302,8 +302,8 @@ export const UsersManager: React.FC<UsersManagerProps> = ({
 
       {/* Modal Crear Usuario */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl max-h-[92vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-[#0A192F]" />
@@ -398,8 +398,8 @@ export const UsersManager: React.FC<UsersManagerProps> = ({
 
       {/* Modal Editar Usuario */}
       {editingUser && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl max-h-[92vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-900">
                 Editar Usuario @{editingUser.username}

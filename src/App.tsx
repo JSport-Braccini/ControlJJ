@@ -12,6 +12,10 @@ import {
   CheckCircle2,
   Receipt,
   FileSpreadsheet,
+  Megaphone,
+  RotateCcw,
+  AlertTriangle,
+  X,
 } from 'lucide-react';
 import {
   ActiveTab,
@@ -40,7 +44,10 @@ import { ConnectionGuideModal } from './components/ConnectionGuideModal';
 import { CorporateLogo } from './components/CorporateLogo';
 import { DigitalTicketsManager } from './components/DigitalTicketsManager';
 import { PublicTicketStore } from './components/PublicTicketStore';
-import { DigitalTicket } from './types/championship';
+import { PublicPortal } from './components/PublicPortal';
+import { PortalContentManager } from './components/PortalContentManager';
+import { ScanFeedbackModal } from './components/ScanFeedbackModal';
+import { DigitalTicket, PaymentMethod, ScanFeedback } from './types/championship';
 
 const AUTH_STORAGE_KEY = 'copacontrol_auth_user_v2';
 
@@ -61,13 +68,24 @@ export function App() {
 
   const [showConnectionModal, setShowConnectionModal] = useState(false);
 
-  // Authentication State: Acceso directo al login sin sesión pre-cargada para máxima protección
+  // Authentication State: Portal público como pantalla inicial + acceso de personal desde icono superior derecho
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [portalView, setPortalView] = useState<'portal' | 'store'>('portal');
+  const [showStaffLoginModal, setShowStaffLoginModal] = useState(false);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('resumen');
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [showGlobalCamera, setShowGlobalCamera] = useState(false);
   const [showStoreModal, setShowStoreModal] = useState(false);
+  const [showGlobalResetModal, setShowGlobalResetModal] = useState(false);
+  const [globalResetPhrase, setGlobalResetPhrase] = useState('');
+
+  // Scan feedback modal state for universal feedback and duplicate blocking
+  const [activeScanFeedback, setActiveScanFeedback] = useState<ScanFeedback | null>(null);
+  const [activeScanTicket, setActiveScanTicket] = useState<DigitalTicket | null>(null);
+  const [activeScanPlayer, setActiveScanPlayer] = useState<Player | null>(null);
+  const [activeScanBeverage, setActiveScanBeverage] = useState<BeverageProduct | null>(null);
+  const [showScanFeedbackModal, setShowScanFeedbackModal] = useState<boolean>(false);
 
   const currentRole: UserRole = currentUser?.role || 'ADMIN';
   const isAdmin = currentRole === 'ADMIN';
@@ -94,6 +112,7 @@ export function App() {
 
   const handleLoginSuccess = (user: AuthUser) => {
     setCurrentUser(user);
+    setShowStaffLoginModal(false);
     try {
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
     } catch {
@@ -107,6 +126,8 @@ export function App() {
 
   const handleLogout = () => {
     setCurrentUser(null);
+    setPortalView('portal');
+    setShowStaffLoginModal(false);
     localStorage.removeItem(AUTH_STORAGE_KEY);
   };
 
@@ -145,15 +166,217 @@ export function App() {
     sendAction('DELETE_TOURNAMENT', { tournamentId });
   };
 
-  // QR Scanning & Auto-Distribution
+  // QR Scanning & Auto-Distribution with instant visual and audio feedback
   const handleProcessQr = (qrCode: string, quantity = 1) => {
     const roleName = currentUser?.displayName || 'Operador';
+    const code = String(qrCode).trim().toUpperCase();
+    const nowTime = new Date().toTimeString().slice(0, 8);
+    const qty = Math.max(1, Number(quantity) || 1);
+
+    // Reset previous modal entity state
+    setActiveScanTicket(null);
+    setActiveScanPlayer(null);
+    setActiveScanBeverage(null);
+
+    // 1. Check Player
+    const matchedPlayer = activeTournamentState.players.find(
+      (p) => p.qrCode.toUpperCase() === code
+    );
+    if (matchedPlayer) {
+      setActiveScanPlayer(matchedPlayer);
+      if (matchedPlayer.checkedIn) {
+        setActiveScanFeedback({
+          id: `fb-${Date.now()}`,
+          status: 'duplicate',
+          category: 'JUGADOR',
+          title: '¡YA ESTÁ REGISTRADO! — Asistencia Duplicada Bloqueada',
+          message: `El jugador ${matchedPlayer.name} (#${matchedPlayer.jerseyNumber} · ${matchedPlayer.team}) ya registró su ingreso a las ${matchedPlayer.checkInTime || 'previamente'}.`,
+          detail: 'El sistema bloquea ingresos duplicados por normativa de torneo.',
+          timestamp: nowTime,
+          qrCode: code,
+        });
+      } else {
+        setActiveScanFeedback({
+          id: `fb-${Date.now()}`,
+          status: 'success',
+          category: 'JUGADOR',
+          title: 'Asistencia de Jugador Registrada',
+          message: `${matchedPlayer.name} (#${matchedPlayer.jerseyNumber} · ${matchedPlayer.team}) habilitado en cancha oficial. Operador: ${roleName}`,
+          detail: `DNI: ${matchedPlayer.dni || 'Registrado'} · Posición: ${matchedPlayer.position}`,
+          timestamp: nowTime,
+          qrCode: code,
+        });
+      }
+      setShowScanFeedbackModal(true);
+      sendAction('PROCESS_QR_SCAN', {
+        tournamentId: activeTournament.id,
+        qrCode: code,
+        quantity: qty,
+        registeredBy: roleName,
+      });
+      return;
+    }
+
+    // 2. Check Digital Ticket (Web or Venue)
+    const matchedTicket = (activeTournamentState.digitalTickets || []).find(
+      (dt) => dt.qrCode.toUpperCase() === code
+    );
+    if (matchedTicket) {
+      setActiveScanTicket(matchedTicket);
+      if (matchedTicket.assisted) {
+        const breakdownText = matchedTicket.items && matchedTicket.items.length > 0
+          ? matchedTicket.items.map((it) => `${it.quantity}x ${it.label}`).join(', ')
+          : `${matchedTicket.quantity}x ${matchedTicket.label}`;
+
+        setActiveScanFeedback({
+          id: `fb-${Date.now()}`,
+          status: 'duplicate',
+          category: 'ESPECTADOR',
+          title: '¡BOLETO YA FUE UTILIZADO! — Entrada Marcada',
+          message: `El boleto de ${matchedTicket.buyerName} (${breakdownText}) ya registró su ingreso a las ${matchedTicket.checkInTime || 'anteriormente'}.`,
+          detail: `Código: ${matchedTicket.qrCode} · Jornada: ${matchedTicket.eventDayLabel}`,
+          timestamp: nowTime,
+          qrCode: code,
+        });
+      } else if (matchedTicket.paymentStatus === 'RESERVED_UNPAID') {
+        const breakdownText = matchedTicket.items && matchedTicket.items.length > 0
+          ? matchedTicket.items.map((it) => `${it.quantity}x ${it.label}`).join(', ')
+          : `${matchedTicket.quantity}x ${matchedTicket.label}`;
+
+        setActiveScanFeedback({
+          id: `fb-${Date.now()}`,
+          status: 'warning',
+          category: 'ESPECTADOR',
+          title: '⚠️ ¡ALERTA: PAGO PENDIENTE! Entrada Separada vía Web',
+          message: `El boleto de ${matchedTicket.buyerName} está SEPARADO y debe abonar S/ ${matchedTicket.totalAmount.toFixed(2)} en puerta (${breakdownText} · Total ${matchedTicket.quantity} pers.).`,
+          detail: `ID:${matchedTicket.id}|TOTAL:${matchedTicket.totalAmount}|BUYER:${matchedTicket.buyerName}`,
+          timestamp: nowTime,
+          qrCode: code,
+        });
+      } else {
+        const breakdownText = matchedTicket.items && matchedTicket.items.length > 0
+          ? matchedTicket.items.map((it) => `${it.quantity}x ${it.label}`).join(', ')
+          : `${matchedTicket.quantity}x ${matchedTicket.label}`;
+
+        setActiveScanFeedback({
+          id: `fb-${Date.now()}`,
+          status: 'success',
+          category: 'ESPECTADOR',
+          title: '¡ACCESO PERMITIDO - ENTRADA PAGADA!',
+          message: `${matchedTicket.buyerName} (${breakdownText} · Total ${matchedTicket.quantity} personas) — Cancelado vía ${matchedTicket.paymentMethod}. Total: S/ ${matchedTicket.totalAmount.toFixed(2)}`,
+          detail: `DNI/Tel: ${matchedTicket.buyerDni || matchedTicket.buyerPhone || 'Registrado'} · Habilitado en Tribuna`,
+          timestamp: nowTime,
+          qrCode: code,
+        });
+      }
+      setShowScanFeedbackModal(true);
+      sendAction('PROCESS_QR_SCAN', {
+        tournamentId: activeTournament.id,
+        qrCode: code,
+        quantity: qty,
+        registeredBy: roleName,
+      });
+      return;
+    }
+
+    // 3. Check Spectator Tier
+    const matchedTier = activeTournamentState.spectatorTiers.find(
+      (t) => t.qrCode.toUpperCase() === code
+    );
+    if (matchedTier) {
+      const totalAmount = matchedTier.price * qty;
+      setActiveScanFeedback({
+        id: `fb-${Date.now()}`,
+        status: 'success',
+        category: 'ESPECTADOR',
+        title: 'Ingreso de Espectador Registrado',
+        message: `+${qty} ${matchedTier.label} (${matchedTier.isChild ? 'Niño / Menor' : 'Adulto / General'}) — Total: S/ ${totalAmount.toFixed(2)}`,
+        timestamp: nowTime,
+        qrCode: code,
+      });
+      setShowScanFeedbackModal(true);
+      sendAction('PROCESS_QR_SCAN', {
+        tournamentId: activeTournament.id,
+        qrCode: code,
+        quantity: qty,
+        registeredBy: roleName,
+      });
+      return;
+    }
+
+    // 4. Check Beverage
+    const matchedBev = activeTournamentState.beverages.find(
+      (b) => b.qrCode.toUpperCase() === code
+    );
+    if (matchedBev) {
+      setActiveScanBeverage(matchedBev);
+      if (matchedBev.stock < qty) {
+        setActiveScanFeedback({
+          id: `fb-${Date.now()}`,
+          status: 'error',
+          category: 'BEBIDA',
+          title: `Stock insuficiente de ${matchedBev.name}`,
+          message: `Solo quedan ${matchedBev.stock} unidades disponibles en inventario.`,
+          timestamp: nowTime,
+          qrCode: code,
+        });
+      } else {
+        const totalAmount = matchedBev.price * qty;
+        setActiveScanFeedback({
+          id: `fb-${Date.now()}`,
+          status: 'success',
+          category: 'BEBIDA',
+          title: `Venta de ${matchedBev.name} Registrada`,
+          message: `${qty} × ${matchedBev.name} (${matchedBev.presentation}) — Total: S/ ${totalAmount.toFixed(2)}`,
+          timestamp: nowTime,
+          qrCode: code,
+        });
+      }
+      setShowScanFeedbackModal(true);
+      sendAction('PROCESS_QR_SCAN', {
+        tournamentId: activeTournament.id,
+        qrCode: code,
+        quantity: qty,
+        registeredBy: roleName,
+      });
+      return;
+    }
+
+    // 5. Unknown QR Code
+    setActiveScanFeedback({
+      id: `fb-${Date.now()}`,
+      status: 'error',
+      category: 'DESCONOCIDO',
+      title: 'Código QR no reconocido',
+      message: `El código "${code}" no está registrado en este torneo.`,
+      timestamp: nowTime,
+      qrCode: code,
+    });
+    setShowScanFeedbackModal(true);
     sendAction('PROCESS_QR_SCAN', {
       tournamentId: activeTournament.id,
-      qrCode,
-      quantity,
+      qrCode: code,
+      quantity: qty,
       registeredBy: roleName,
     });
+  };
+
+  const handleConfirmDoorPaymentFromModal = (ticketId: string, paymentMethod: PaymentMethod) => {
+    const roleName = currentUser?.displayName || 'Operador Puerta';
+    sendAction('CONFIRM_DOOR_PAYMENT_AND_CHECKIN', {
+      tournamentId: activeTournament.id,
+      ticketId,
+      paymentMethod,
+      operatorName: roleName,
+    });
+    if (activeScanFeedback) {
+      setActiveScanFeedback({
+        ...activeScanFeedback,
+        status: 'success',
+        title: '¡PAGO COBRADO EN PUERTA E INGRESO REGISTRADO!',
+        message: `Pago registrado vía ${paymentMethod}. Acceso a tribuna habilitado.`,
+      });
+    }
   };
 
   // Players Actions
@@ -202,7 +425,8 @@ export function App() {
     tierId: string,
     newPrice: number,
     label?: string,
-    description?: string
+    description?: string,
+    enabled?: boolean
   ) => {
     sendAction('UPDATE_TICKET_PRICE', {
       tournamentId: activeTournament.id,
@@ -210,6 +434,7 @@ export function App() {
       price: newPrice,
       label,
       description,
+      enabled,
     });
   };
 
@@ -299,14 +524,57 @@ export function App() {
     });
   };
 
-  // Login Modal si no hay sesión activa
+  // Portal Público de Publicidad, Campeonatos y Boletería Directa cuando no hay sesión de control iniciada
   if (!currentUser) {
     return (
-      <LoginModal
-        systemConfig={systemConfig}
-        users={users}
-        onLoginSuccess={handleLoginSuccess}
-      />
+      <>
+        {portalView === 'store' ? (
+          <PublicTicketStore
+            tournaments={serverData.tournaments}
+            activeTournament={activeTournament}
+            activeTournamentState={activeTournamentState}
+            systemConfig={systemConfig}
+            onSelectTournament={handleSelectTournament}
+            onCreateTicket={(ticket) => {
+              sendAction('CREATE_DIGITAL_TICKET', {
+                tournamentId: activeTournament.id,
+                ticket,
+              });
+            }}
+            onBackToLogin={() => setPortalView('portal')}
+            backLabel="← Volver al Portal"
+            onUpdateEventDays={(tournamentId, eventDays) => {
+              sendAction('UPDATE_EVENT_DAYS', {
+                tournamentId,
+                eventDays,
+              });
+            }}
+            isAdmin={false}
+          />
+        ) : (
+          <PublicPortal
+            tournaments={serverData.tournaments}
+            statesByTournament={serverData.statesByTournament}
+            activeTournamentId={activeTournament.id}
+            systemConfig={systemConfig}
+            onSelectTournamentToBuy={(tournamentId) => {
+              handleSelectTournament(tournamentId);
+              setPortalView('store');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onOpenStaffLogin={() => setShowStaffLoginModal(true)}
+          />
+        )}
+
+        {showStaffLoginModal && (
+          <LoginModal
+            systemConfig={systemConfig}
+            users={users}
+            onLoginSuccess={handleLoginSuccess}
+            onClose={() => setShowStaffLoginModal(false)}
+          />
+        )}
+      </>
     );
   }
 
@@ -326,6 +594,13 @@ export function App() {
           });
         }}
         onBackToLogin={handleLogout}
+        onUpdateEventDays={(tournamentId, eventDays) => {
+          sendAction('UPDATE_EVENT_DAYS', {
+            tournamentId,
+            eventDays,
+          });
+        }}
+        isAdmin={isAdmin}
       />
     );
   }
@@ -333,9 +608,9 @@ export function App() {
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-slate-900 font-sans w-full max-w-full overflow-x-hidden">
       {/* Top Bar Principal (Azul Marino Profundo #0A192F con borde Rojo #DC2626) */}
-      <header className="no-print bg-[#0A192F] text-white border-b-2 border-red-600 sticky top-0 z-30 shadow-md w-full max-w-full overflow-hidden">
+      <header className="no-print bg-[#0A192F] text-white border-b-2 border-red-600 sticky top-0 z-30 shadow-md w-full max-w-full">
         {/* Fila 1: Logo Corporativo + Identidad + Controles Rápidos */}
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-4 w-full">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2 sm:py-0 sm:h-16 flex flex-wrap items-center justify-between gap-2 sm:gap-4 w-full">
           {/* Zona 1: Logo Corporativo JJ y Estación de Usuario */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0 min-w-0">
             <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl overflow-hidden bg-white p-0.5 border border-slate-700 shadow-sm shrink-0 flex items-center justify-center">
@@ -348,7 +623,7 @@ export function App() {
 
             <div className="flex flex-col min-w-0">
               <div className="flex items-center gap-1.5">
-                <span className="text-sm sm:text-base font-bold tracking-tight text-white leading-tight truncate max-w-[125px] xs:max-w-[160px] sm:max-w-none font-display">
+                <span className="text-sm sm:text-base font-bold tracking-tight text-white leading-tight truncate max-w-[130px] xs:max-w-[175px] sm:max-w-none font-display">
                   {systemConfig.systemName}
                 </span>
 
@@ -394,122 +669,23 @@ export function App() {
             </div>
           </div>
 
-          {/* Zona 2: Menú Desktop (SOLO ADMIN) */}
-          {isAdmin && (
-            <nav className="hidden lg:flex items-center gap-1 text-xs font-semibold text-slate-300">
+          {/* Zona 2: Botón Restablecer (Admin) + Cámara en Vivo + Nube + Avatar + Logout */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
+            {isAdmin && (
               <button
                 type="button"
-                onClick={() => setActiveTab('resumen')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  activeTab === 'resumen'
-                    ? 'bg-red-600 text-white font-bold'
-                    : 'hover:text-white hover:bg-slate-800'
-                }`}
+                onClick={() => {
+                  setGlobalResetPhrase('');
+                  setShowGlobalResetModal(true);
+                }}
+                className="px-2 sm:px-3 py-1.5 bg-slate-800 hover:bg-red-700 text-red-300 hover:text-white border border-red-500/40 text-xs font-bold rounded-lg transition-all cursor-pointer shadow-xs flex items-center gap-1.5 min-h-[36px]"
+                title="Restablecer todos los contadores del torneo activo a cero"
               >
-                <LayoutDashboard className="w-4 h-4" />
-                Principal
+                <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden xs:inline">Restablecer</span>
               </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('gastos')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  activeTab === 'gastos'
-                    ? 'bg-red-600 text-white font-bold'
-                    : 'hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                <Receipt className="w-4 h-4" />
-                Gastos
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('reporte')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  activeTab === 'reporte'
-                    ? 'bg-red-600 text-white font-bold'
-                    : 'hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                Reporte General
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('jugadores')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  activeTab === 'jugadores'
-                    ? 'bg-red-600 text-white font-bold'
-                    : 'hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                <Users className="w-4 h-4" />
-                Jugadores
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('espectadores')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  activeTab === 'espectadores'
-                    ? 'bg-red-600 text-white font-bold'
-                    : 'hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                <Ticket className="w-4 h-4" />
-                Espectadores
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('boletos')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  activeTab === 'boletos'
-                    ? 'bg-red-600 text-white font-bold'
-                    : 'text-emerald-300 hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                <Ticket className="w-4 h-4 text-emerald-400" />
-                Boletos Web ({(activeTournamentState.digitalTickets || []).length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('bebidas')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  activeTab === 'bebidas'
-                    ? 'bg-red-600 text-white font-bold'
-                    : 'hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                <CupSoda className="w-4 h-4" />
-                Bebidas
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('torneos')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  activeTab === 'torneos'
-                    ? 'bg-red-600 text-white font-bold'
-                    : 'hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                <Trophy className="w-4 h-4" />
-                Torneos
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('usuarios')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  activeTab === 'usuarios'
-                    ? 'bg-red-600 text-white font-bold'
-                    : 'text-red-300 hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                <UserCog className="w-4 h-4" />
-                Usuarios ({users.length})
-              </button>
-            </nav>
-          )}
+            )}
 
-          {/* Zona 3: Botón de Cámara en Vivo + Nube + Avatar + Logout */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {/* Botón de Escaneo con Cámara (Accesible para TODOS los usuarios) */}
             <button
               type="button"
@@ -525,7 +701,7 @@ export function App() {
             <button
               type="button"
               onClick={() => setShowConnectionModal(true)}
-              className="flex items-center gap-1.5 px-2 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg text-xs font-mono-tabular shrink-0 cursor-pointer transition-colors"
+              className="flex items-center gap-1.5 px-2 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg text-xs font-mono-tabular shrink-0 cursor-pointer transition-colors min-h-[36px]"
               title={
                 isConnected
                   ? `Conectado a la nube (${serverData.connectedClientsCount || 1} online) · Clic para ver detalles`
@@ -581,7 +757,7 @@ export function App() {
 
         {/* Fila 2: Sub-Barra de Torneo Ordenada en Celular y PC */}
         <div className="bg-[#050D1A] border-t border-slate-800/80 px-3 sm:px-6 py-1.5 w-full max-w-full">
-          <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 text-xs">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
             {/* Lado Izquierdo: Torneo */}
             <div className="flex items-center gap-1.5 min-w-0">
               <Trophy className="w-3.5 h-3.5 text-red-500 shrink-0" />
@@ -592,7 +768,7 @@ export function App() {
                 <select
                   value={activeTournament.id}
                   onChange={(e) => handleSelectTournament(e.target.value)}
-                  className="px-2 py-0.5 font-semibold text-white bg-slate-900 border border-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-red-500 shadow-2xs text-xs truncate max-w-[150px] xs:max-w-[200px] sm:max-w-none"
+                  className="px-2 py-0.5 font-semibold text-white bg-slate-900 border border-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-red-500 shadow-2xs text-xs truncate max-w-[180px] sm:max-w-none"
                 >
                   {serverData.tournaments.map((t) => (
                     <option key={t.id} value={t.id}>
@@ -609,7 +785,7 @@ export function App() {
 
             {/* Lado Derecho: Sede y Fecha */}
             <div className="flex items-center gap-1.5 text-slate-300 text-[10px] sm:text-[11px] shrink-0">
-              <span className="truncate max-w-[90px] xs:max-w-[140px] sm:max-w-none">
+              <span className="truncate max-w-[120px] sm:max-w-none">
                 {activeTournament.venue}
               </span>
               <span aria-hidden="true" className="text-slate-500">·</span>
@@ -630,42 +806,48 @@ export function App() {
           </div>
         </div>
 
-        {/* Fila 3: Menú Móvil Limpio y Desplazable (SOLO ADMINISTRADOR) */}
+        {/* Fila 3: Barra Completa de Módulos (Visible y Ajustada tanto en Móvil como en PC sin recortes) */}
         {isAdmin && (
-          <div className="lg:hidden border-t border-slate-800 bg-[#0A192F] px-2.5 py-1.5 flex items-center gap-1.5 overflow-x-auto w-full max-w-full no-scrollbar">
-            {(
-              [
-                ['resumen', 'Principal', LayoutDashboard],
-                ['boletos', `Boletos (${(activeTournamentState.digitalTickets || []).length})`, Ticket],
-                ['jugadores', 'Jugadores', Users],
-                ['espectadores', 'Entradas', Ticket],
-                ['bebidas', 'Bebidas', CupSoda],
-                ['gastos', 'Gastos', Receipt],
-                ['reporte', 'Reporte', FileSpreadsheet],
-                ['torneos', 'Torneos', Trophy],
-                ['usuarios', `Usuarios (${users.length})`, UserCog],
-              ] as [ActiveTab, string, any][]
-            ).map(([tabKey, label, Icon]) => (
-              <button
-                key={tabKey}
-                type="button"
-                onClick={() => setActiveTab(tabKey)}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
-                  activeTab === tabKey
-                    ? 'bg-red-600 text-white font-bold shadow-xs'
-                    : 'text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5 shrink-0" />
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
+          <nav
+            aria-label="Módulos del sistema"
+            className="border-t border-slate-800 bg-[#0A192F] w-full max-w-full"
+          >
+            <div className="max-w-7xl mx-auto px-2.5 sm:px-6 py-1.5 flex items-center gap-1.5 overflow-x-auto lg:flex-wrap no-scrollbar">
+              {(
+                [
+                  ['resumen', 'Principal', LayoutDashboard, ''],
+                  ['boletos', `Boletos Web (${(activeTournamentState.digitalTickets || []).length})`, Ticket, 'text-emerald-300'],
+                  ['jugadores', 'Jugadores', Users, ''],
+                  ['espectadores', 'Espectadores', Ticket, ''],
+                  ['bebidas', 'Bebidas', CupSoda, ''],
+                  ['gastos', 'Gastos', Receipt, ''],
+                  ['reporte', 'Reporte General', FileSpreadsheet, ''],
+                  ['torneos', 'Torneos', Trophy, ''],
+                  ['portal', 'Publicidad', Megaphone, 'text-amber-300'],
+                  ['usuarios', `Usuarios (${users.length})`, UserCog, 'text-red-300'],
+                ] as [ActiveTab, string, any, string][]
+              ).map(([tabKey, label, Icon, accent]) => (
+                <button
+                  key={tabKey}
+                  type="button"
+                  onClick={() => setActiveTab(tabKey)}
+                  className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                    activeTab === tabKey
+                      ? 'bg-red-600 text-white font-bold shadow-xs'
+                      : `${accent || 'text-slate-300'} hover:text-white hover:bg-slate-800`
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5 shrink-0" />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          </nav>
         )}
       </header>
 
       {/* Main Content Viewport */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 overflow-x-hidden">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 min-w-0">
         {/* VISTAS AISLADAS SEGÚN EL ROL DE USUARIO */}
         {/* Caso 1: ADMIN - Puede ver cualquier tab seleccionada */}
         {isAdmin && (
@@ -684,6 +866,7 @@ export function App() {
                 currentUserName={currentUser.displayName}
                 connectedClientsCount={serverData.connectedClientsCount}
                 onQuickScan={handleProcessQr}
+                onOpenGlobalCamera={() => setShowGlobalCamera(true)}
                 onGoToPlayers={() => setActiveTab('jugadores')}
                 onGoToSpectators={() => setActiveTab('espectadores')}
                 onGoToBeverages={() => setActiveTab('bebidas')}
@@ -725,6 +908,7 @@ export function App() {
                 tournament={activeTournament}
                 tournamentState={activeTournamentState}
                 systemConfig={systemConfig}
+                isAdmin={isAdmin}
                 onConfirmDoorPayment={(ticketId, paymentMethod) => {
                   sendAction('CONFIRM_DOOR_PAYMENT_AND_CHECKIN', {
                     tournamentId: activeTournament.id,
@@ -735,6 +919,12 @@ export function App() {
                 }}
                 onDeleteTicket={(ticketId) => {
                   sendAction('DELETE_DIGITAL_TICKET', {
+                    tournamentId: activeTournament.id,
+                    ticketId,
+                  });
+                }}
+                onResetTicketAttendance={(ticketId) => {
+                  sendAction('RESET_TICKET_ATTENDANCE', {
                     tournamentId: activeTournament.id,
                     ticketId,
                   });
@@ -751,6 +941,12 @@ export function App() {
                 onAddPlayer={handleAddPlayer}
                 onUpdatePlayer={handleUpdatePlayer}
                 onDeletePlayer={handleDeletePlayer}
+                onClearAttendance={(playerId) => {
+                  sendAction('CLEAR_PLAYER_ATTENDANCE', {
+                    tournamentId: activeTournament.id,
+                    playerId,
+                  });
+                }}
                 onScanPlayer={(qrCode) => handleProcessQr(qrCode, 1)}
               />
             )}
@@ -771,6 +967,12 @@ export function App() {
                   sendAction('CREATE_DIGITAL_TICKET', {
                     tournamentId: activeTournament.id,
                     ticket,
+                  });
+                }}
+                onDeleteSpectatorEntry={(entryId) => {
+                  sendAction('DELETE_SPECTATOR_ENTRY', {
+                    tournamentId: activeTournament.id,
+                    entryId,
                   });
                 }}
               />
@@ -805,6 +1007,14 @@ export function App() {
                     eventDays,
                   });
                 }}
+              />
+            )}
+
+            {activeTab === 'portal' && (
+              <PortalContentManager
+                config={systemConfig}
+                tournaments={serverData.tournaments}
+                onUpdateConfig={handleUpdateConfig}
               />
             )}
 
@@ -898,13 +1108,105 @@ export function App() {
         }
       />
 
+      {/* Modal de Retroalimentación de Escaneo, Asistencia, Pagos y Bloqueo de Duplicados */}
+      <ScanFeedbackModal
+        isOpen={showScanFeedbackModal}
+        onClose={() => setShowScanFeedbackModal(false)}
+        feedback={activeScanFeedback}
+        ticket={activeScanTicket}
+        player={activeScanPlayer}
+        beverage={activeScanBeverage}
+        onConfirmDoorPayment={handleConfirmDoorPaymentFromModal}
+      />
+
       {/* Modal de Configuración del Nombre del Sistema y Logo JJ */}
       {showConfigModal && isAdmin && (
         <SystemSettingsModal
           config={systemConfig}
           onUpdateConfig={handleUpdateConfig}
+          onResetAllData={() => {
+            setGlobalResetPhrase('');
+            setShowGlobalResetModal(true);
+          }}
           onClose={() => setShowConfigModal(false)}
         />
+      )}
+
+      {/* Modal Global de Confirmación: Restablecer Sistema a Cero */}
+      {showGlobalResetModal && isAdmin && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 space-y-4 border border-slate-200 shadow-2xl max-h-[92vh] overflow-y-auto my-auto">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5 text-red-600">
+                <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Restablecer Sistema a CERO
+                  </h3>
+                  <p className="text-xs text-red-600 font-semibold">
+                    Torneo activo: {activeTournament.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGlobalResetModal(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="text-xs text-slate-600 space-y-2 bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
+              <p className="font-semibold text-slate-800">
+                Al confirmar, se ejecutarán los siguientes reinicios:
+              </p>
+              <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                <li><strong>Jugadores:</strong> Asistencias reiniciadas a Pendiente y duplicados a 0.</li>
+                <li><strong>Espectadores y Boletos:</strong> Historial de boletos, QR digitales y conteos a 0.</li>
+                <li><strong>Bebidas:</strong> Unidades vendidas a 0 y ventas reiniciadas.</li>
+                <li><strong>Gastos:</strong> Lista de gastos operativos reiniciada a 0.</li>
+              </ul>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-700">
+                Para confirmar, escribe <span className="font-mono text-red-600 font-bold">CONFIRMAR</span>:
+              </label>
+              <input
+                type="text"
+                value={globalResetPhrase}
+                onChange={(e) => setGlobalResetPhrase(e.target.value)}
+                placeholder="Escribe CONFIRMAR"
+                className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowGlobalResetModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={globalResetPhrase.trim().toUpperCase() !== 'CONFIRMAR'}
+                onClick={() => {
+                  handleResetDataToZero();
+                  setShowGlobalResetModal(false);
+                }}
+                className="px-4 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg cursor-pointer shadow-xs flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Restablecer Todo a Cero</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Modal de Estado de Conexión, Vercel y Servidor en la Nube */}
@@ -950,6 +1252,13 @@ export function App() {
                   setShowStoreModal(false);
                 }}
                 onBackToLogin={() => setShowStoreModal(false)}
+                onUpdateEventDays={(tournamentId, eventDays) => {
+                  sendAction('UPDATE_EVENT_DAYS', {
+                    tournamentId,
+                    eventDays,
+                  });
+                }}
+                isAdmin={isAdmin}
               />
             </div>
           </div>

@@ -23,7 +23,13 @@ function loadInitialState(): AppServerData {
         Array.isArray(parsed.tournaments) &&
         parsed.tournaments.length > 0
       ) {
-        return parsed;
+        return {
+          ...parsed,
+          config: {
+            ...DEFAULT_SYSTEM_CONFIG,
+            ...(parsed.config || {}),
+          },
+        };
       }
     }
   } catch (err) {
@@ -107,8 +113,15 @@ export function useRealtimeSync() {
             cloudData.statesByTournament
           ) {
             isUpdatingFromCloudRef.current = true;
-            setServerData(cloudData);
-            saveToStorage(cloudData);
+            const mergedCloudData: AppServerData = {
+              ...cloudData,
+              config: {
+                ...DEFAULT_SYSTEM_CONFIG,
+                ...(cloudData.config || {}),
+              },
+            };
+            setServerData(mergedCloudData);
+            saveToStorage(mergedCloudData);
             setIsConnected(true);
             setIsCloudSynced(true);
             setLastSyncTime(new Date().toTimeString().slice(0, 8));
@@ -149,7 +162,7 @@ export function useRealtimeSync() {
       let targetWsUrl = customWsUrl;
       if (!targetWsUrl && typeof window !== 'undefined') {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        targetWsUrl = `${protocol}//${window.location.host}`;
+        targetWsUrl = `${protocol}//${window.location.host}/ws`;
       }
 
       if (targetWsUrl && !window.location.hostname.endsWith('vercel.app')) {
@@ -216,10 +229,15 @@ export function useRealtimeSync() {
         }
 
         // CRITICAL: Synchronize directly with Firestore in the cloud
-        const stateDocRef = doc(db, 'system', 'state');
-        setDoc(stateDocRef, next, { merge: true }).catch((err) => {
-          handleFirestoreError(err, OperationType.UPDATE, 'system/state');
-        });
+        try {
+          const stateDocRef = doc(db, 'system', 'state');
+          const cleanNext = JSON.parse(JSON.stringify(next));
+          setDoc(stateDocRef, cleanNext, { merge: true }).catch((err) => {
+            handleFirestoreError(err, OperationType.UPDATE, 'system/state');
+          });
+        } catch (err) {
+          console.warn('Firestore sync warning:', err);
+        }
 
         return next;
       });

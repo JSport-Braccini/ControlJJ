@@ -7,6 +7,7 @@ import {
   ArrowRight,
   Lock,
   Trophy,
+  X,
 } from 'lucide-react';
 import { AuthUser, SystemConfig } from '../types/championship';
 import { CorporateLogo } from './CorporateLogo';
@@ -16,12 +17,14 @@ interface LoginModalProps {
   systemConfig: SystemConfig;
   users: AuthUser[];
   onLoginSuccess: (user: AuthUser) => void;
+  onClose?: () => void;
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({
   systemConfig,
   users,
   onLoginSuccess,
+  onClose,
 }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -50,16 +53,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0A192F] bg-cover bg-center bg-no-repeat overflow-hidden"
+      className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4 bg-[#0A192F] bg-cover bg-center bg-no-repeat overflow-y-auto"
       style={{
         backgroundImage: `url(${volleyballCourtBg || '/images/volleyball_court.jpg'})`,
       }}
     >
       {/* Velo arquitectónico formal en azul marino (#0A192F) que resalta la cancha de voleibol */}
-      <div className="absolute inset-0 bg-gradient-to-b from-[#0A192F]/80 via-[#0A192F]/75 to-[#0A192F]/92 backdrop-blur-[3px] pointer-events-none" />
+      <div className="fixed inset-0 bg-gradient-to-b from-[#0A192F]/80 via-[#0A192F]/75 to-[#0A192F]/92 backdrop-blur-[3px] pointer-events-none" />
 
       {/* Contenedor Principal Flotante */}
-      <div className="relative z-10 w-full max-w-sm">
+      <div className="relative z-10 w-full max-w-sm my-auto">
         {/* Kicker superior institucional */}
         <div className="text-center mb-3">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-[11px] font-semibold text-slate-200 tracking-wider uppercase font-mono shadow-sm">
@@ -72,6 +75,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-white/40 shadow-2xl overflow-hidden">
           {/* Cabecera Azul Marino con detalle Rojo */}
           <div className="bg-[#0A192F] text-white p-6 pb-5 text-center relative border-b-2 border-red-600">
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="absolute right-3 top-3 p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Volver al portal público"
+                aria-label="Cerrar ventana de acceso"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
             {/* Contenedor del Logo con Fallback Seguro */}
             <div className="w-20 h-20 rounded-2xl mx-auto overflow-hidden bg-white p-1 border-2 border-slate-700 shadow-lg flex items-center justify-center transform transition-transform hover:scale-105">
               <CorporateLogo
@@ -85,7 +99,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               {systemConfig.systemName}
             </h1>
             <p className="mt-0.5 text-xs text-slate-300 font-medium">
-              Acceso Seguro al Panel de Administración
+              Control de Boletas, Bebidas y Administración
             </p>
           </div>
 

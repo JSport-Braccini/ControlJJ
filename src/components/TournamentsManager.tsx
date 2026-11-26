@@ -309,8 +309,8 @@ export const TournamentsManager: React.FC<TournamentsManagerProps> = ({
 
       {/* Modal Crear Torneo (Solo Administrador) */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-lg w-full p-6 space-y-4 border border-slate-200 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-lg w-full p-6 space-y-4 border border-slate-200 shadow-xl max-h-[92vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Trophy className="w-5 h-5 text-emerald-600" />
@@ -428,8 +428,8 @@ export const TournamentsManager: React.FC<TournamentsManagerProps> = ({
 
       {/* Modal Editar Torneo (Solo Administrador) */}
       {editingTournament && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-lg w-full p-6 space-y-4 border border-slate-200 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-lg w-full p-6 space-y-4 border border-slate-200 shadow-xl max-h-[92vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-900">Editar Torneo</h3>
               <button

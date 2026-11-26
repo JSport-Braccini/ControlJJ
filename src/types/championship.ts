@@ -6,6 +6,7 @@ export type ActiveTab =
   | 'gastos'
   | 'reporte'
   | 'torneos'
+  | 'portal'
   | 'usuarios'
   | 'boletos'
   | 'configuracion';
@@ -35,6 +36,9 @@ export interface EventDayPricing {
   adultPrice: number;
   childPrice: number;
   vipPrice: number;
+  adultEnabled?: boolean;
+  childEnabled?: boolean;
+  vipEnabled?: boolean;
 }
 
 export type PaymentMethod = 'YAPE' | 'PLIN' | 'TRANSFER' | 'EFECTIVO_PUERTA';
@@ -78,6 +82,29 @@ export interface DigitalTicket {
   items?: DigitalTicketItem[];
 }
 
+export interface PortalPromotion {
+  id: string;
+  title: string;
+  subtitle: string;
+  categoryLabel?: string;
+  imageUrl: string;
+  ctaLabel?: string;
+  linkedTournamentId?: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface PastChampionshipHighlight {
+  id: string;
+  championshipName: string;
+  editionOrDate: string;
+  photoUrl: string;
+  comment: string;
+  authorName: string;
+  authorRole: string;
+  createdAt: string;
+}
+
 export interface SystemConfig {
   systemName: string;
   tagline: string;
@@ -93,6 +120,13 @@ export interface SystemConfig {
   bankAccount?: string;
   bankCci?: string;
   bankHolder?: string;
+  // Portal Público de Publicidad y Campeonatos Pasados
+  heroTitle?: string;
+  heroSubtitle?: string;
+  heroBannerUrl?: string;
+  heroCtaLabel?: string;
+  promotions?: PortalPromotion[];
+  pastChampionships?: PastChampionshipHighlight[];
 }
 
 export interface Player {
@@ -131,6 +165,7 @@ export interface SpectatorTier {
   price: number;
   isChild: boolean;
   description: string;
+  enabled?: boolean;
 }
 
 export interface SpectatorEntry {
@@ -174,7 +209,7 @@ export interface BeverageSale {
 
 export interface ScanFeedback {
   id: string;
-  status: 'success' | 'duplicate' | 'error';
+  status: 'success' | 'duplicate' | 'error' | 'warning';
   category: 'JUGADOR' | 'ESPECTADOR' | 'BEBIDA' | 'DESCONOCIDO';
   title: string;
   message: string;

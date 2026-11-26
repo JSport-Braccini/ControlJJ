@@ -7,13 +7,17 @@ import {
   Share2,
   Calendar,
   User,
-  Phone,
   DollarSign,
   Download,
-  Shield,
+  Copy,
+  Check,
+  FileDown,
+  Loader2,
 } from 'lucide-react';
 import { DigitalTicket, Tournament, SystemConfig } from '../types/championship';
 import { CorporateLogo } from './CorporateLogo';
+import { renderDigitalTicketImage } from '../utils/ticketImageRenderer';
+import { printOrDownloadTicketPdf } from '../utils/printHelper';
 
 interface DigitalTicketCardProps {
   ticket: DigitalTicket;
@@ -29,10 +33,19 @@ export const DigitalTicketCard: React.FC<DigitalTicketCardProps> = ({
   onClose,
 }) => {
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [copiedImage, setCopiedImage] = useState<boolean>(false);
+  const [isGeneratingImage, setIsGeneratingImage] = useState<boolean>(false);
+  const [isPrinting, setIsPrinting] = useState<boolean>(false);
+  const [printDone, setPrintDone] = useState<boolean>(false);
+
+  // Reliable instant QR URL fallback
+  const fallbackQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(ticket.qrCode)}`;
+  const effectiveQrSrc = qrDataUrl || fallbackQrUrl;
 
   useEffect(() => {
+    // Generate QR using canvas
     QRCode.toDataURL(ticket.qrCode, {
-      width: 260,
+      width: 280,
       margin: 1,
       color: {
         dark: '#0A192F',
@@ -40,8 +53,11 @@ export const DigitalTicketCard: React.FC<DigitalTicketCardProps> = ({
       },
     })
       .then((url) => setQrDataUrl(url))
-      .catch((err) => console.error('Error generating QR:', err));
-  }, [ticket.qrCode]);
+      .catch((err) => {
+        console.warn('Local QR generation error, using fallback:', err);
+        setQrDataUrl(fallbackQrUrl);
+      });
+  }, [ticket.qrCode, fallbackQrUrl]);
 
   const handleShareWhatsApp = () => {
     const isPaid = ticket.paymentStatus === 'PAID';
@@ -62,7 +78,8 @@ export const DigitalTicketCard: React.FC<DigitalTicketCardProps> = ({
       `💰 *Total:* S/ ${ticket.totalAmount.toFixed(2)}\n` +
       `💳 *Estado:* ${statusText}\n` +
       `🔢 *Código Único QR:* ${ticket.qrCode}\n\n` +
-      `⚡ *Instrucciones:* Muestra este código QR al ingresar para ser escaneado por los operadores autorizados.`;
+      `📷 *VER / ABRIR IMAGEN OFICIAL DEL QR:*\n${fallbackQrUrl}\n\n` +
+      `⚡ *Instrucciones:* Muestra la imagen de este código QR al ingresar para ser escaneado por los operadores autorizados en la puerta.`;
 
     const phoneClean = ticket.buyerPhone.replace(/\D/g, '');
     const targetUrl = phoneClean
@@ -72,8 +89,84 @@ export const DigitalTicketCard: React.FC<DigitalTicketCardProps> = ({
     window.open(targetUrl, '_blank');
   };
 
-  const handlePrint = () => {
-    window.print();
+  const handleCopyQrImage = async () => {
+    try {
+      const { blob } = await renderDigitalTicketImage({
+        ticket,
+        tournament,
+        systemConfig,
+      });
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': blob }),
+      ]);
+      setCopiedImage(true);
+      setTimeout(() => setCopiedImage(false), 4500);
+    } catch (err) {
+      console.warn('Full ticket image clipboard copy failed, falling back to QR blob/link:', err);
+      try {
+        const response = await fetch(effectiveQrSrc);
+        const blob = await response.blob();
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'image/png': blob }),
+        ]);
+        setCopiedImage(true);
+        setTimeout(() => setCopiedImage(false), 4500);
+      } catch {
+        try {
+          await navigator.clipboard.writeText(fallbackQrUrl);
+          setCopiedImage(true);
+          setTimeout(() => setCopiedImage(false), 4500);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  };
+
+  const handleDownloadQrImage = async () => {
+    setIsGeneratingImage(true);
+    try {
+      const { dataUrl } = await renderDigitalTicketImage({
+        ticket,
+        tournament,
+        systemConfig,
+      });
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `Boleto-QR-${ticket.qrCode}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      console.warn('Full ticket image render failed, falling back to QR PNG:', err);
+      const a = document.createElement('a');
+      a.href = effectiveQrSrc;
+      a.target = '_blank';
+      a.download = `Boleto-QR-${ticket.qrCode}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  };
+
+  const handlePrint = async () => {
+    setIsPrinting(true);
+    try {
+      await printOrDownloadTicketPdf(ticket, tournament, systemConfig);
+      setPrintDone(true);
+      setTimeout(() => setPrintDone(false), 3000);
+    } catch (err) {
+      console.warn('Error generando PDF para imprimir:', err);
+      try {
+        window.print();
+      } catch {
+        // ignore
+      }
+    } finally {
+      setIsPrinting(false);
+    }
   };
 
   const isPaid = ticket.paymentStatus === 'PAID';
@@ -125,17 +218,12 @@ export const DigitalTicketCard: React.FC<DigitalTicketCardProps> = ({
       <div className="p-4 space-y-3.5 text-xs text-slate-800">
         {/* Código QR Central */}
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col items-center justify-center">
-          {qrDataUrl ? (
-            <img
-              src={qrDataUrl}
-              alt={`QR ${ticket.qrCode}`}
-              className="w-44 h-44 object-contain rounded-lg shadow-xs border border-white"
-            />
-          ) : (
-            <div className="w-44 h-44 bg-slate-200 animate-pulse rounded-lg flex items-center justify-center text-slate-400">
-              Generando QR...
-            </div>
-          )}
+          <img
+            src={effectiveQrSrc}
+            alt={`QR ${ticket.qrCode}`}
+            className="w-48 h-48 object-contain rounded-lg shadow-xs border border-white bg-white"
+            loading="eager"
+          />
           <div className="mt-2 font-mono font-bold text-sm tracking-widest text-[#0A192F] bg-white px-3 py-1 rounded-md border border-slate-200">
             {ticket.qrCode}
           </div>
@@ -222,37 +310,90 @@ export const DigitalTicketCard: React.FC<DigitalTicketCardProps> = ({
           )}
         </div>
 
-        {/* Botones de Acción (WhatsApp / Descargar) */}
+        {/* Botones de Acción (WhatsApp / Copiar Imagen / Descargar / Imprimir) */}
         <div className="space-y-2 pt-1 print:hidden">
+          {/* Botón Principal WhatsApp */}
           <button
             type="button"
             onClick={handleShareWhatsApp}
-            className="w-full py-2.5 px-3 bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+            className="w-full py-2.5 px-3 bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm"
           >
-            <Share2 className="w-4 h-4" />
-            <span>Compartir al WhatsApp del Comprador</span>
+            <Share2 className="w-4 h-4 shrink-0" />
+            <span>Compartir al WhatsApp (con Imagen QR)</span>
           </button>
 
-          <div className="flex gap-2">
+          {/* Botón Exclusivo para PC: Copiar la Imagen PNG al Portapapeles */}
+          <button
+            type="button"
+            onClick={handleCopyQrImage}
+            className={`w-full py-2 px-3 text-xs font-bold rounded-xl transition-all border flex items-center justify-center gap-2 cursor-pointer shadow-2xs ${
+              copiedImage
+                ? 'bg-emerald-600 text-white border-emerald-600'
+                : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300'
+            }`}
+            title="Copia la imagen del QR para pegarla directamente con Ctrl+V en WhatsApp Web o Telegram"
+          >
+            {copiedImage ? (
+              <>
+                <Check className="w-4 h-4 text-white shrink-0" />
+                <span>¡Imagen QR Copiada! Pega con Ctrl+V en WhatsApp</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-4 h-4 text-slate-600 shrink-0" />
+                <span>Copiar Imagen QR (para pegar con Ctrl+V en WhatsApp)</span>
+              </>
+            )}
+          </button>
+
+          {/* Botones de Descargar Imagen e Imprimir */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={handleDownloadQrImage}
+              disabled={isGeneratingImage}
+              className="py-2 px-2.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-800 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 transition-colors"
+            >
+              {isGeneratingImage ? (
+                <Loader2 className="w-3.5 h-3.5 text-slate-600 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5 text-slate-600" />
+              )}
+              <span>{isGeneratingImage ? 'Generando...' : 'Guardar Imagen'}</span>
+            </button>
+
             <button
               type="button"
               onClick={handlePrint}
-              className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200"
+              disabled={isPrinting}
+              className={`py-2 px-2.5 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer border transition-colors ${
+                printDone
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-800 border-slate-200'
+              }`}
             >
-              <Download className="w-3.5 h-3.5 text-slate-500" />
-              <span>Imprimir / PDF</span>
+              {isPrinting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : printDone ? (
+                <Check className="w-3.5 h-3.5 text-white" />
+              ) : (
+                <FileDown className="w-3.5 h-3.5 text-slate-600" />
+              )}
+              <span>
+                {isPrinting ? 'Generando PDF...' : printDone ? 'PDF Listo' : 'Imprimir / PDF'}
+              </span>
             </button>
-
-            {onClose && (
-              <button
-                type="button"
-                onClick={onClose}
-                className="py-2 px-4 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs cursor-pointer"
-              >
-                Cerrar
-              </button>
-            )}
           </div>
+
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full py-2 px-4 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs cursor-pointer transition-colors"
+            >
+              Cerrar
+            </button>
+          )}
         </div>
       </div>
     </div>

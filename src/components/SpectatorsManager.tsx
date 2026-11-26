@@ -17,6 +17,8 @@ import {
   Share2,
   Smartphone,
   Minus,
+  Calendar,
+  Lock,
 } from 'lucide-react';
 import {
   SpectatorTier,
@@ -28,6 +30,7 @@ import {
   Tournament,
   SystemConfig,
   PaymentMethod,
+  EventDayPricing,
 } from '../types/championship';
 import { QrCodeImage } from './QrCodeImage';
 import { CameraQrModal } from './CameraQrModal';
@@ -41,10 +44,17 @@ interface SpectatorsManagerProps {
   entries: SpectatorEntry[];
   currentUserRole: UserRole;
   onRegisterSpectator: (type: SpectatorTicketType, quantity: number) => void;
-  onUpdateTierPrice: (tierId: string, newPrice: number, label?: string, description?: string) => void;
+  onUpdateTierPrice: (
+    tierId: string,
+    newPrice: number,
+    label?: string,
+    description?: string,
+    enabled?: boolean
+  ) => void;
   onAddTicketTier: (tier: SpectatorTier) => void;
   onDeleteTicketTier: (tierId: string) => void;
   onSellVenueTicket?: (ticket: DigitalTicket) => void;
+  onDeleteSpectatorEntry?: (entryId: string) => void;
 }
 
 export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
@@ -59,8 +69,53 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
   onAddTicketTier,
   onDeleteTicketTier,
   onSellVenueTicket,
+  onDeleteSpectatorEntry,
 }) => {
   const isAdmin = currentUserRole === 'ADMIN';
+
+  // Jornadas sincronizadas con el torneo y la boletería
+  const eventDays: EventDayPricing[] = tournament?.eventDays && tournament.eventDays.length > 0
+    ? tournament.eventDays
+    : [
+        {
+          id: 'day-default',
+          label: `Jornada Oficial (${tournament?.date || 'Hoy'})`,
+          date: tournament?.date || new Date().toISOString().slice(0, 10),
+          adultPrice: tiers.find((t) => t.type === 'ADULTO')?.price ?? 10,
+          childPrice: tiers.find((t) => t.type === 'NINO')?.price ?? 5,
+          vipPrice: tiers.find((t) => t.type === 'VIP')?.price ?? 20,
+        },
+      ];
+
+  const [selectedJornadaId, setSelectedJornadaId] = useState<string>(eventDays[0]?.id || 'day-default');
+  const activeJornada = eventDays.find((d) => d.id === selectedJornadaId) || eventDays[0];
+
+  const getTierPriceForJornada = (tier: SpectatorTier): number => {
+    if (tier.type === 'GRATIS' || tier.price === 0) return 0;
+    if (tier.type === 'VIP' && activeJornada?.vipPrice !== undefined) return Number(activeJornada.vipPrice);
+    if (tier.type === 'ADULTO' && activeJornada?.adultPrice !== undefined) return Number(activeJornada.adultPrice);
+    if (tier.type === 'NINO' && activeJornada?.childPrice !== undefined) return Number(activeJornada.childPrice);
+    return tier.price;
+  };
+
+  const isTierEnabledForJornada = (tier: SpectatorTier): boolean => {
+    if (tier.type === 'ADULTO') {
+      return activeJornada?.adultEnabled !== undefined
+        ? activeJornada.adultEnabled
+        : tier.enabled !== false;
+    }
+    if (tier.type === 'NINO') {
+      return activeJornada?.childEnabled !== undefined
+        ? activeJornada.childEnabled
+        : tier.enabled !== false;
+    }
+    if (tier.type === 'VIP') {
+      return activeJornada?.vipEnabled !== undefined
+        ? activeJornada.vipEnabled
+        : tier.enabled !== false;
+    }
+    return tier.enabled !== false;
+  };
 
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [editingTier, setEditingTier] = useState<SpectatorTier | null>(null);
@@ -90,6 +145,7 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
   const [editLabel, setEditLabel] = useState('');
   const [editPrice, setEditPrice] = useState<number>(10);
   const [editDescription, setEditDescription] = useState('');
+  const [editEnabled, setEditEnabled] = useState<boolean>(true);
 
   const totalSpectators = entries.reduce((acc, e) => acc + e.quantity, 0);
   const totalFree = entries
@@ -103,8 +159,15 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
     .reduce((acc, e) => acc + e.quantity, 0);
   const totalRevenue = entries.reduce((acc, e) => acc + e.totalAmount, 0);
 
-  const totalVenueQty = tiers.reduce((acc, t) => acc + (venueTierQuantities[t.id] || 0), 0);
-  const totalVenueAmount = tiers.reduce((acc, t) => acc + (venueTierQuantities[t.id] || 0) * t.price, 0);
+  const totalVenueQty = tiers.reduce(
+    (acc, t) => acc + (isTierEnabledForJornada(t) ? venueTierQuantities[t.id] || 0 : 0),
+    0
+  );
+  const totalVenueAmount = tiers.reduce(
+    (acc, t) =>
+      acc + (isTierEnabledForJornada(t) ? (venueTierQuantities[t.id] || 0) * getTierPriceForJornada(t) : 0),
+    0
+  );
 
   const handleOpenAdd = () => {
     if (!isAdmin) {
@@ -127,6 +190,7 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
     setEditLabel(tier.label);
     setEditPrice(tier.price);
     setEditDescription(tier.description);
+    setEditEnabled(tier.enabled !== false);
   };
 
   const handleDelete = (tier: SpectatorTier) => {
@@ -142,7 +206,7 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTier) return;
-    onUpdateTierPrice(editingTier.id, editPrice, editLabel, editDescription);
+    onUpdateTierPrice(editingTier.id, editPrice, editLabel, editDescription, editEnabled);
     setEditingTier(null);
   };
 
@@ -194,17 +258,19 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
     e.preventDefault();
     if (!venueBuyerName.trim()) return;
 
-    // Filter tiers with quantity > 0
+    // Filter tiers with quantity > 0 using prices for the active jornada (and only enabled tiers)
     const items: DigitalTicketItem[] = [];
     tiers.forEach((t) => {
+      if (!isTierEnabledForJornada(t)) return;
       const qty = venueTierQuantities[t.id] || 0;
       if (qty > 0) {
+        const unitP = getTierPriceForJornada(t);
         items.push({
           ticketType: t.type,
           label: t.label,
           quantity: qty,
-          unitPrice: t.price,
-          subtotal: qty * t.price,
+          unitPrice: unitP,
+          subtotal: qty * unitP,
         });
       }
     });
@@ -227,8 +293,8 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
       qrCode,
       ticketType: primaryType,
       label: summaryLabel,
-      eventDayLabel: tournament?.date ? `Jornada ${tournament.date}` : 'Jornada Oficial',
-      eventDate: tournament?.date || new Date().toISOString().slice(0, 10),
+      eventDayLabel: activeJornada.label,
+      eventDate: activeJornada.date,
       buyerName: venueBuyerName.trim(),
       buyerPhone: venueBuyerPhone.trim(),
       buyerDni: '',
@@ -254,15 +320,18 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
     setLastSoldTicket(newTicket);
     setShowVenueSaleModal(false);
 
-    // Open WhatsApp directly if phone provided!
+    // Open WhatsApp directly if phone provided with full image link!
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(newTicket.qrCode)}`;
     const itemsListText = items.map((it) => `  • ${it.quantity}x ${it.label}: S/ ${it.subtotal.toFixed(2)}`).join('\n');
     const message = `🎟️ *BOLETO DIGITAL OFICIAL - ${tournament?.name || 'JJ CopaControl'}*\n\n` +
       `👤 *Comprador:* ${newTicket.buyerName}\n` +
+      `📅 *Jornada:* ${newTicket.eventDayLabel}\n` +
       `🎫 *Boletos Adquiridos (${newTicket.quantity} entradas):*\n${itemsListText}\n\n` +
       `💰 *Total Cobrado:* S/ ${newTicket.totalAmount.toFixed(2)} (Pago: ${venuePaymentMethod === 'EFECTIVO_PUERTA' ? 'Efectivo en Puerta' : venuePaymentMethod})\n` +
       `🔢 *Código QR Único:* ${newTicket.qrCode}\n` +
       `✅ *Estado:* PAGADO EN TAQUILLA LOCAL\n\n` +
-      `Muestra este código al ingresar al partido.`;
+      `📷 *VER / ABRIR IMAGEN OFICIAL DEL QR:*\n${qrImageUrl}\n\n` +
+      `⚡ *Instrucciones:* Muestra la imagen de este código QR al ingresar para ser escaneado por los operadores autorizados en la puerta.`;
 
     const cleanPhone = venueBuyerPhone.replace(/\D/g, '');
     const targetUrl = cleanPhone
@@ -289,8 +358,9 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
           <button
             type="button"
             onClick={() => {
-              if (tiers.length > 0 && Object.keys(venueTierQuantities).length === 0) {
-                setVenueTierQuantities({ [tiers[0].id]: 1 });
+              const firstEnabled = tiers.find((t) => isTierEnabledForJornada(t));
+              if (firstEnabled && Object.keys(venueTierQuantities).length === 0) {
+                setVenueTierQuantities({ [firstEnabled.id]: 1 });
               }
               setShowVenueSaleModal(true);
             }}
@@ -453,18 +523,31 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
           const matchingEntries = entries.filter((e) => e.qrCode === tier.qrCode || e.ticketType === tier.type);
           const tierCount = matchingEntries.reduce((acc, e) => acc + e.quantity, 0);
           const tierRevenue = matchingEntries.reduce((acc, e) => acc + e.totalAmount, 0);
+          const isTierEnabled = tier.enabled !== false;
 
           return (
             <div
               key={tier.id}
-              className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 flex flex-col justify-between space-y-4 shadow-xs hover:border-slate-300 transition-colors"
+              className={`border rounded-xl p-4 sm:p-5 flex flex-col justify-between space-y-4 shadow-xs transition-colors ${
+                isTierEnabled
+                  ? 'bg-white border-slate-200 hover:border-slate-300'
+                  : 'bg-slate-100 border-slate-300 opacity-75'
+              }`}
             >
               <div>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <span className="text-[11px] font-mono-tabular font-semibold text-slate-500 uppercase tracking-tight">
-                      {tier.isChild ? 'Categoría Niño / Menor' : 'Categoría General'}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[11px] font-mono-tabular font-semibold text-slate-500 uppercase tracking-tight">
+                        {tier.isChild ? 'Categoría Niño / Menor' : 'Categoría General'}
+                      </span>
+                      {!isTierEnabled && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-bold">
+                          <Lock className="w-2.5 h-2.5" />
+                          Bloqueada
+                        </span>
+                      )}
+                    </div>
                     <h2 className="text-base sm:text-lg font-bold text-slate-900 mt-0.5">
                       {tier.label}
                     </h2>
@@ -476,7 +559,7 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
                         type="button"
                         onClick={() => handleOpenEdit(tier)}
                         className="p-1.5 text-slate-400 hover:text-slate-900 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
-                        title="Editar precio y descripción"
+                        title="Editar precio, bloqueo y descripción"
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
@@ -519,6 +602,7 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
                     type="number"
                     min={1}
                     max={50}
+                    disabled={!isTierEnabled}
                     value={qty}
                     onChange={(e) =>
                       setQuantities((prev) => ({
@@ -527,14 +611,15 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
                       }))
                     }
                     aria-label={`Cantidad boletos ${tier.label}`}
-                    className="w-16 px-2.5 py-2 text-sm font-mono-tabular text-center border border-slate-300 rounded-lg bg-white text-slate-900 min-h-[44px]"
+                    className="w-16 px-2.5 py-2 text-sm font-mono-tabular text-center border border-slate-300 rounded-lg bg-white text-slate-900 min-h-[44px] disabled:bg-slate-200 disabled:text-slate-400"
                   />
                   <button
                     type="button"
+                    disabled={!isTierEnabled}
                     onClick={() => onRegisterSpectator(tier.type, qty)}
-                    className="flex-1 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer shadow-xs min-h-[44px] flex items-center justify-center text-center"
+                    className="flex-1 px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer shadow-xs min-h-[44px] flex items-center justify-center text-center"
                   >
-                    Registrar (S/ {(tier.price * qty).toFixed(2)})
+                    {isTierEnabled ? `Registrar (S/ ${(tier.price * qty).toFixed(2)})` : 'Modalidad Bloqueada'}
                   </button>
                 </div>
               </div>
@@ -697,10 +782,78 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
         </div>
       </div>
 
+      {/* Historial Reciente de Asistencia en Taquilla (Eliminar Solo Admin) */}
+      {isAdmin && onDeleteSpectatorEntry && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs w-full max-w-full">
+          <div className="px-4 sm:px-5 py-3.5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50/70">
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-red-600" />
+                Historial de Asistencia e Ingresos de Espectadores
+              </h3>
+              <p className="text-[11px] sm:text-xs text-slate-500">
+                Solo el Administrador puede eliminar un registro de asistencia equivocado.
+              </p>
+            </div>
+            <span className="text-xs font-mono-tabular font-semibold text-slate-600">
+              {entries.length} registro(s)
+            </span>
+          </div>
+
+          {entries.length === 0 ? (
+            <div className="p-6 text-center text-xs text-slate-400">
+              Aún no hay registros de asistencia de espectadores en este torneo.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
+              {entries.slice(0, 35).map((entry) => (
+                <div
+                  key={entry.id}
+                  className="px-4 sm:px-5 py-2.5 flex items-center justify-between gap-3 text-xs hover:bg-slate-50 transition-colors"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-bold text-slate-900">{entry.label}</span>
+                      <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                        {entry.quantity} {entry.quantity === 1 ? 'pers.' : 'pers.'}
+                      </span>
+                      <span className="font-mono font-bold text-emerald-700">
+                        S/ {entry.totalAmount.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-mono-tabular truncate">
+                      {entry.timestamp} · QR: {entry.qrCode} · Operador: {entry.registeredBy || 'Taquilla'}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (
+                        confirm(
+                          `¿Eliminar registro de asistencia "${entry.label}" (${entry.quantity} pers. · S/ ${entry.totalAmount.toFixed(2)})?`
+                        )
+                      ) {
+                        onDeleteSpectatorEntry(entry.id);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg cursor-pointer shrink-0 transition-colors"
+                    title="Eliminar Asistencia (Solo Admin)"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Eliminar Asistencia</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Modal Editar Entrada (Solo Administrador) */}
       {editingTier && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl max-h-[92vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-900">Editar Tarifa de Entrada</h3>
               <button
@@ -753,6 +906,28 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
                 />
               </div>
 
+              <div className="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-slate-50">
+                <div>
+                  <span className="text-xs font-bold text-slate-800 block">
+                    Disponibilidad de esta modalidad
+                  </span>
+                  <span className="text-[11px] text-slate-500">
+                    Si la bloqueas, no se podrá seleccionar para compra ni taquilla.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditEnabled((prev) => !prev)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shrink-0 ${
+                    editEnabled
+                      ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                      : 'bg-red-100 text-red-700 hover:bg-red-200'
+                  }`}
+                >
+                  {editEnabled ? 'Habilitada' : 'Bloqueada'}
+                </button>
+              </div>
+
               <div className="pt-2 flex items-center justify-end gap-2">
                 <button
                   type="button"
@@ -775,8 +950,8 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
 
       {/* Modal Crear Tarifa (Solo Administrador) */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl max-h-[92vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-900">Crear Nueva Tarifa de Entrada</h3>
               <button
@@ -908,8 +1083,8 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
 
       {/* Modal Venta en Puerta con Envío Inmediato a WhatsApp */}
       {showVenueSaleModal && (
-        <div className="fixed inset-0 z-50 bg-[#0A192F]/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl p-5 space-y-4 my-auto">
+        <div className="fixed inset-0 z-50 bg-[#0A192F]/80 backdrop-blur-sm flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl p-5 space-y-4 max-h-[92vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-[#25D366]/10 flex items-center justify-center">
@@ -963,6 +1138,30 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
                 />
               </div>
 
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-red-600" />
+                  Jornada / Fecha del Evento:
+                </label>
+                <select
+                  value={selectedJornadaId}
+                  onChange={(e) => setSelectedJornadaId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-slate-50 font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#0A192F]"
+                >
+                  {eventDays.map((day) => {
+                    const parts: string[] = [];
+                    if (day.adultEnabled !== false) parts.push(`General: S/ ${(Number(day.adultPrice) || 10).toFixed(2)}`);
+                    if (day.childEnabled !== false) parts.push(`Niño: S/ ${(Number(day.childPrice) || 5).toFixed(2)}`);
+                    if (day.vipEnabled !== false) parts.push(`VIP: S/ ${(Number(day.vipPrice) || 20).toFixed(2)}`);
+                    return (
+                      <option key={day.id} value={day.id}>
+                        {day.label} — {parts.join(' | ')}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="block text-[11px] font-bold text-slate-700">
@@ -975,27 +1174,40 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
 
                 <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
                   {tiers.map((t) => {
-                    const qty = venueTierQuantities[t.id] || 0;
+                    const enabledForDay = isTierEnabledForJornada(t);
+                    const qty = enabledForDay ? venueTierQuantities[t.id] || 0 : 0;
+                    const tierUnitPrice = getTierPriceForJornada(t);
                     return (
                       <div
                         key={t.id}
                         className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 transition-all ${
-                          qty > 0 ? 'border-[#0A192F] bg-blue-50/30' : 'border-slate-200 bg-white'
+                          !enabledForDay
+                            ? 'border-slate-200 bg-slate-100 opacity-65'
+                            : qty > 0
+                            ? 'border-[#0A192F] bg-blue-50/30'
+                            : 'border-slate-200 bg-white'
                         }`}
                       >
                         <div className="min-w-0">
                           <span className="text-xs font-bold text-slate-900 block truncate">
                             {t.label}
                           </span>
-                          <span className="text-[10px] text-slate-500 font-mono">
-                            S/ {t.price.toFixed(2)} c/u
-                          </span>
+                          {enabledForDay ? (
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              S/ {tierUnitPrice.toFixed(2)} c/u
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-700 bg-red-100 px-1.5 py-0.5 rounded">
+                              <Lock className="w-2.5 h-2.5" />
+                              Bloqueada en esta jornada
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
                           <div className="text-right mr-1">
                             <span className="text-xs font-bold font-mono text-slate-900 block">
-                              S/ {(qty * t.price).toFixed(2)}
+                              {enabledForDay ? `S/ ${(qty * tierUnitPrice).toFixed(2)}` : 'No disp.'}
                             </span>
                           </div>
 
@@ -1008,7 +1220,7 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
                                   [t.id]: Math.max(0, (prev[t.id] || 0) - 1),
                                 }))
                               }
-                              disabled={qty === 0}
+                              disabled={!enabledForDay || qty === 0}
                               className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center text-slate-700 font-bold text-xs cursor-pointer"
                             >
                               <Minus className="w-3 h-3" />
@@ -1024,7 +1236,8 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
                                   [t.id]: Math.min(50, (prev[t.id] || 0) + 1),
                                 }))
                               }
-                              className="w-6 h-6 rounded bg-[#0A192F] hover:bg-slate-800 text-white flex items-center justify-center font-bold text-xs cursor-pointer"
+                              disabled={!enabledForDay}
+                              className="w-6 h-6 rounded bg-[#0A192F] hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed text-white flex items-center justify-center font-bold text-xs cursor-pointer"
                             >
                               <Plus className="w-3 h-3" />
                             </button>
@@ -1123,13 +1336,15 @@ export const SpectatorsManager: React.FC<SpectatorsManagerProps> = ({
 
       {/* Tarjeta Visual de Boleto Recién Vendido */}
       {lastSoldTicket && tournament && systemConfig && (
-        <div className="fixed inset-0 z-50 bg-[#0A192F]/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <DigitalTicketCard
-            ticket={lastSoldTicket}
-            tournament={tournament}
-            systemConfig={systemConfig}
-            onClose={() => setLastSoldTicket(null)}
-          />
+        <div className="print-reset-modal fixed inset-0 z-50 bg-[#0A192F]/80 backdrop-blur-sm flex items-start sm:items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="my-auto w-full max-w-sm">
+            <DigitalTicketCard
+              ticket={lastSoldTicket}
+              tournament={tournament}
+              systemConfig={systemConfig}
+              onClose={() => setLastSoldTicket(null)}
+            />
+          </div>
         </div>
       )}
     </div>

@@ -254,7 +254,7 @@ export function applyAppAction(
 
           const feedback: ScanFeedback = {
             id: `fb-${Date.now()}`,
-            status: 'error',
+            status: 'warning',
             category: 'ESPECTADOR',
             title: '⚠️ ¡ALERTA: PAGO PENDIENTE! Entrada Separada vía Web',
             message: `El boleto de ${ticket.buyerName} está SEPARADO y debe abonar S/ ${ticket.totalAmount.toFixed(2)} en puerta (${breakdownText} · Total ${ticket.quantity} pers.).`,
@@ -401,25 +401,78 @@ export function applyAppAction(
       return nextState;
     }
 
-    // CRUD TICKETS
-    case 'UPDATE_TICKET_PRICE': {
-      const { tournamentId, tierId, price, label, description } = payload;
+    case 'CLEAR_PLAYER_ATTENDANCE': {
+      const { tournamentId, playerId } = payload;
       const tState = nextState.statesByTournament[tournamentId];
       if (tState) {
         nextState.statesByTournament[tournamentId] = {
           ...tState,
+          players: tState.players.map((p) => {
+            if (p.id !== playerId) return p;
+            const copy: Player = {
+              ...p,
+              checkedIn: false,
+              duplicateAttempts: 0,
+            };
+            delete copy.checkInTime;
+            return copy;
+          }),
+        };
+      }
+      return nextState;
+    }
+
+    // CRUD TICKETS
+    case 'UPDATE_TICKET_PRICE': {
+      const { tournamentId, tierId, price, label, description, enabled } = payload;
+      const tState = nextState.statesByTournament[tournamentId];
+      if (tState) {
+        let changedType: string | undefined;
+        const newPrice = price !== undefined ? Number(price) : undefined;
+        const newEnabled = enabled !== undefined ? Boolean(enabled) : undefined;
+        nextState.statesByTournament[tournamentId] = {
+          ...tState,
           spectatorTiers: tState.spectatorTiers.map((t) => {
             if (t.id === tierId) {
+              changedType = t.type;
               return {
                 ...t,
-                price: price !== undefined ? Number(price) : t.price,
+                price: newPrice !== undefined ? newPrice : t.price,
                 label: label !== undefined ? label : t.label,
                 description: description !== undefined ? description : t.description,
+                enabled: newEnabled !== undefined ? newEnabled : t.enabled,
               };
             }
             return t;
           }),
         };
+
+        // Propagate updated price and enabled state to matching eventDays
+        if (changedType && (newPrice !== undefined || newEnabled !== undefined)) {
+          const syncType = changedType;
+          const syncVal = newPrice;
+          nextState.tournaments = nextState.tournaments.map((t) => {
+            if (t.id === tournamentId && t.eventDays) {
+              return {
+                ...t,
+                eventDays: t.eventDays.map((d) => ({
+                  ...d,
+                  vipPrice: syncType === 'VIP' && syncVal !== undefined ? syncVal : (d.vipPrice ?? 20),
+                  adultPrice: syncType === 'ADULTO' && syncVal !== undefined ? syncVal : (d.adultPrice ?? 10),
+                  childPrice: syncType === 'NINO' && syncVal !== undefined ? syncVal : (d.childPrice ?? 5),
+                  ...(newEnabled !== undefined && syncType === 'VIP' ? { vipEnabled: newEnabled } : {}),
+                  ...(newEnabled !== undefined && syncType === 'ADULTO' ? { adultEnabled: newEnabled } : {}),
+                  ...(newEnabled !== undefined && syncType === 'NINO' ? { childEnabled: newEnabled } : {}),
+                })),
+              };
+            }
+            return t;
+          });
+          const currT = nextState.tournaments.find((t) => t.id === tournamentId);
+          if (currT) {
+            nextState.statesByTournament[tournamentId].tournament = currT;
+          }
+        }
       }
       return nextState;
     }
@@ -680,6 +733,45 @@ export function applyAppAction(
       return nextState;
     }
 
+    case 'RESET_TICKET_ATTENDANCE': {
+      const { tournamentId, ticketId } = payload;
+      const tState = nextState.statesByTournament[tournamentId];
+      if (tState && tState.digitalTickets) {
+        const target = tState.digitalTickets.find((tk) => tk.id === ticketId);
+        const updatedTickets = tState.digitalTickets.map((tk) => {
+          if (tk.id !== ticketId) return tk;
+          const copy = { ...tk, assisted: false };
+          delete copy.checkInTime;
+          delete copy.validatedBy;
+          return copy;
+        });
+        // Si el boleto web registró entradas al escanearse en puerta, retirar también ese registro de asistencia
+        const updatedEntries =
+          target && target.channel === 'WEB' && !target.paidAtDoor
+            ? tState.spectatorEntries.filter((se) => se.qrCode !== target.qrCode)
+            : tState.spectatorEntries;
+
+        nextState.statesByTournament[tournamentId] = {
+          ...tState,
+          digitalTickets: updatedTickets,
+          spectatorEntries: updatedEntries,
+        };
+      }
+      return nextState;
+    }
+
+    case 'DELETE_SPECTATOR_ENTRY': {
+      const { tournamentId, entryId } = payload;
+      const tState = nextState.statesByTournament[tournamentId];
+      if (tState) {
+        nextState.statesByTournament[tournamentId] = {
+          ...tState,
+          spectatorEntries: tState.spectatorEntries.filter((se) => se.id !== entryId),
+        };
+      }
+      return nextState;
+    }
+
     case 'UPDATE_EVENT_DAYS': {
       const { tournamentId, eventDays } = payload;
       const tState = nextState.statesByTournament[tournamentId];
@@ -691,9 +783,40 @@ export function applyAppAction(
         nextState.tournaments = nextState.tournaments.map((t) =>
           t.id === tournamentId ? updatedTournament : t
         );
+
+        // Also sync spectatorTiers with the first event day's prices & enabled flags
+        const firstDay = eventDays && eventDays.length > 0 ? eventDays[0] : null;
+        const updatedTiers = firstDay
+          ? tState.spectatorTiers.map((tier) => {
+              if (tier.type === 'VIP') {
+                return {
+                  ...tier,
+                  ...(firstDay.vipPrice !== undefined ? { price: Number(firstDay.vipPrice) } : {}),
+                  ...(firstDay.vipEnabled !== undefined ? { enabled: firstDay.vipEnabled } : {}),
+                };
+              }
+              if (tier.type === 'ADULTO') {
+                return {
+                  ...tier,
+                  ...(firstDay.adultPrice !== undefined ? { price: Number(firstDay.adultPrice) } : {}),
+                  ...(firstDay.adultEnabled !== undefined ? { enabled: firstDay.adultEnabled } : {}),
+                };
+              }
+              if (tier.type === 'NINO') {
+                return {
+                  ...tier,
+                  ...(firstDay.childPrice !== undefined ? { price: Number(firstDay.childPrice) } : {}),
+                  ...(firstDay.childEnabled !== undefined ? { enabled: firstDay.childEnabled } : {}),
+                };
+              }
+              return tier;
+            })
+          : tState.spectatorTiers;
+
         nextState.statesByTournament[tournamentId] = {
           ...tState,
           tournament: updatedTournament,
+          spectatorTiers: updatedTiers,
         };
       }
       return nextState;
@@ -705,12 +828,11 @@ export function applyAppAction(
       if (tState) {
         nextState.statesByTournament[tournamentId] = {
           ...tState,
-          players: tState.players.map((p) => ({
-            ...p,
-            checkedIn: false,
-            checkInTime: undefined,
-            duplicateAttempts: 0,
-          })),
+          players: tState.players.map((p) => {
+            const copy = { ...p, checkedIn: false, duplicateAttempts: 0 };
+            delete copy.checkInTime;
+            return copy;
+          }),
           spectatorEntries: [],
           beverages: tState.beverages.map((b) => ({
             ...b,

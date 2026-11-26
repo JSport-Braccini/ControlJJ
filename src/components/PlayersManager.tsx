@@ -28,6 +28,7 @@ interface PlayersManagerProps {
   onAddPlayer: (player: Omit<Player, 'id' | 'qrCode' | 'checkedIn' | 'duplicateAttempts'>) => void;
   onUpdatePlayer: (player: Player) => void;
   onDeletePlayer: (playerId: string) => void;
+  onClearAttendance?: (playerId: string) => void;
   onScanPlayer: (qrCode: string) => void;
 }
 
@@ -38,6 +39,7 @@ export const PlayersManager: React.FC<PlayersManagerProps> = ({
   onAddPlayer,
   onUpdatePlayer,
   onDeletePlayer,
+  onClearAttendance,
   onScanPlayer,
 }) => {
   const isAdmin = currentUserRole === 'ADMIN';
@@ -146,12 +148,24 @@ export const PlayersManager: React.FC<PlayersManagerProps> = ({
     setEditingPlayer(null);
   };
 
-  const handleToggleAttendance = (p: Player) => {
-    onUpdatePlayer({
-      ...p,
-      checkedIn: !p.checkedIn,
-      checkInTime: !p.checkedIn ? new Date().toTimeString().slice(0, 8) : undefined,
-    });
+  const handleDeleteAttendance = (p: Player) => {
+    if (!isAdmin) {
+      alert('Solo el Administrador General puede eliminar asistencias registradas.');
+      return;
+    }
+    if (!p.checkedIn) return;
+    if (confirm(`¿Eliminar la asistencia registrada de ${p.name}? El jugador volverá a estado Pendiente.`)) {
+      if (onClearAttendance) {
+        onClearAttendance(p.id);
+      } else {
+        onUpdatePlayer({
+          ...p,
+          checkedIn: false,
+          checkInTime: undefined,
+          duplicateAttempts: 0,
+        });
+      }
+    }
   };
 
   const handleDirectScanSubmit = (e: React.FormEvent) => {
@@ -435,14 +449,16 @@ export const PlayersManager: React.FC<PlayersManagerProps> = ({
                   {player.checkedIn ? 'Probar Duplicado' : 'Marcar Asistencia'}
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => handleToggleAttendance(player)}
-                  className="p-2.5 text-slate-500 hover:text-slate-800 bg-slate-100 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
-                  title="Alternar estado"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
+                {isAdmin && player.checkedIn && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteAttendance(player)}
+                    className="p-2.5 text-amber-700 hover:text-amber-900 bg-amber-50 border border-amber-200 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
+                    title="Eliminar asistencia (Solo Admin)"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+                )}
 
                 {isAdmin && (
                   <>
@@ -551,14 +567,16 @@ export const PlayersManager: React.FC<PlayersManagerProps> = ({
                         >
                           {player.checkedIn ? 'Duplicado' : 'Marcar'}
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => handleToggleAttendance(player)}
-                          className="p-1.5 text-slate-400 hover:text-slate-700 rounded-md hover:bg-slate-100 cursor-pointer"
-                          title={player.checkedIn ? 'Desmarcar asistencia' : 'Marcar presente'}
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                        </button>
+                        {isAdmin && player.checkedIn && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteAttendance(player)}
+                            className="p-1.5 text-amber-600 hover:text-amber-800 rounded-md hover:bg-amber-50 cursor-pointer"
+                            title="Eliminar asistencia (Solo Admin)"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
 
                         {isAdmin && (
                           <>
@@ -592,8 +610,8 @@ export const PlayersManager: React.FC<PlayersManagerProps> = ({
 
       {/* Modal: Ver Credencial QR */}
       {selectedQrPlayer && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-sm w-full p-6 text-center space-y-4 border border-slate-200 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-sm w-full p-6 text-center space-y-4 border border-slate-200 shadow-xl max-h-[92vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between">
               <span className="text-xs font-mono-tabular font-semibold text-slate-500">
                 CREDENCIAL OFICIAL
@@ -632,8 +650,8 @@ export const PlayersManager: React.FC<PlayersManagerProps> = ({
 
       {/* Modal: Inscribir Jugador (Solo Administrador) */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl max-h-[92vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-slate-900" />
@@ -739,8 +757,8 @@ export const PlayersManager: React.FC<PlayersManagerProps> = ({
 
       {/* Modal: Editar Jugador (Solo Administrador) */}
       {editingPlayer && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-xl max-h-[92vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-900">Editar Datos de Jugador</h3>
               <button

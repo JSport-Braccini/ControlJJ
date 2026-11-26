@@ -1,9 +1,15 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
+import {
+  verifyVoucherWithOcr,
+  doesRecipientMatch,
+} from './src/utils/voucherOcrVerifier.js';
 import {
   Tournament,
   TournamentState,
@@ -31,7 +37,7 @@ const PORT = 3000;
 const app = express();
 const server = createServer(app);
 
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
 
 // Persistent Local File DB (Guarantees no data loss across server restarts)
 const DB_FILE = path.resolve(__dirname, 'data', 'copacontrol_store.json');
@@ -42,7 +48,13 @@ function loadPersistedState(): AppServerData {
       const raw = fs.readFileSync(DB_FILE, 'utf-8');
       const parsed = JSON.parse(raw);
       if (parsed && parsed.tournaments && parsed.statesByTournament) {
-        return parsed;
+        return {
+          ...parsed,
+          config: {
+            ...DEFAULT_SYSTEM_CONFIG,
+            ...(parsed.config || {}),
+          },
+        };
       }
     }
   } catch (err) {
@@ -73,9 +85,31 @@ function persistState() {
   }
 }
 
-// WebSocket Server attached to same HTTP server
-const wss = new WebSocketServer({ server });
+// WebSocket Server attached to same HTTP server (noServer avoids collisions with Vite's /vite-ws)
+const wss = new WebSocketServer({ noServer: true });
 const clientMetadata = new Map<WebSocket, { user?: AuthUser; connectedAt: string }>();
+
+server.on('upgrade', (req, socket, head) => {
+  const protocol = String(req.headers['sec-websocket-protocol'] || '');
+  const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+
+  // Let Vite's own WebSocket listener handle HMR / ping upgrades
+  if (
+    pathname === '/vite-ws' ||
+    protocol.includes('vite-hmr') ||
+    protocol.includes('vite-ping')
+  ) {
+    return;
+  }
+
+  if (pathname === '/ws' || pathname === '/') {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req);
+    });
+  } else {
+    socket.destroy();
+  }
+});
 
 function getOnlinePresences(): ConnectedUserPresence[] {
   const result: ConnectedUserPresence[] = [];
@@ -376,7 +410,7 @@ function handleClientAction(
 
           const feedback = {
             id: `fb-${Date.now()}`,
-            status: 'error' as const,
+            status: 'warning' as const,
             category: 'ESPECTADOR' as const,
             title: '⚠️ ¡ALERTA: PAGO PENDIENTE! Entrada Separada vía Web',
             message: `El boleto de ${matchedTicket.buyerName} está SEPARADO y debe abonar S/ ${matchedTicket.totalAmount.toFixed(2)} en puerta (${breakdownText} · Total ${matchedTicket.quantity} pers.).`,
@@ -517,9 +551,28 @@ function handleClientAction(
       break;
     }
 
+    case 'CLEAR_PLAYER_ATTENDANCE': {
+      const { tournamentId, playerId } = payload;
+      const state = serverData.statesByTournament[tournamentId];
+      if (state) {
+        state.players = state.players.map((p) => {
+          if (p.id !== playerId) return p;
+          const copy: Player = {
+            ...p,
+            checkedIn: false,
+            duplicateAttempts: 0,
+          };
+          delete copy.checkInTime;
+          return copy;
+        });
+        broadcastFullState();
+      }
+      break;
+    }
+
     // CRUD TICKETS
     case 'UPDATE_TICKET_PRICE': {
-      const { tournamentId, tierId, price, label, description } = payload;
+      const { tournamentId, tierId, price, label, description, enabled } = payload;
       const state = serverData.statesByTournament[tournamentId];
       if (state) {
         const tier = state.spectatorTiers.find((t) => t.id === tierId);
@@ -527,6 +580,26 @@ function handleClientAction(
           if (price !== undefined) tier.price = Number(price);
           if (label !== undefined) tier.label = label;
           if (description !== undefined) tier.description = description;
+          if (enabled !== undefined) tier.enabled = Boolean(enabled);
+
+          // Propagate to eventDays
+          const syncType = tier.type;
+          const syncVal = tier.price;
+          const syncEnabled = enabled !== undefined ? Boolean(enabled) : undefined;
+          const tIdx = serverData.tournaments.findIndex((t) => t.id === tournamentId);
+          if (tIdx !== -1 && serverData.tournaments[tIdx].eventDays) {
+            serverData.tournaments[tIdx].eventDays = serverData.tournaments[tIdx].eventDays!.map((d) => ({
+              ...d,
+              vipPrice: syncType === 'VIP' ? syncVal : (d.vipPrice ?? 20),
+              adultPrice: syncType === 'ADULTO' ? syncVal : (d.adultPrice ?? 10),
+              childPrice: syncType === 'NINO' ? syncVal : (d.childPrice ?? 5),
+              ...(syncEnabled !== undefined && syncType === 'VIP' ? { vipEnabled: syncEnabled } : {}),
+              ...(syncEnabled !== undefined && syncType === 'ADULTO' ? { adultEnabled: syncEnabled } : {}),
+              ...(syncEnabled !== undefined && syncType === 'NINO' ? { childEnabled: syncEnabled } : {}),
+            }));
+            state.tournament = serverData.tournaments[tIdx];
+          }
+
           broadcastFullState();
         }
       }
@@ -737,6 +810,36 @@ function handleClientAction(
       break;
     }
 
+    case 'RESET_TICKET_ATTENDANCE': {
+      const { tournamentId, ticketId } = payload;
+      const state = serverData.statesByTournament[tournamentId];
+      if (state && state.digitalTickets) {
+        const target = state.digitalTickets.find((tk) => tk.id === ticketId);
+        state.digitalTickets = state.digitalTickets.map((tk) => {
+          if (tk.id !== ticketId) return tk;
+          const copy = { ...tk, assisted: false };
+          delete copy.checkInTime;
+          delete copy.validatedBy;
+          return copy;
+        });
+        if (target && target.channel === 'WEB' && !target.paidAtDoor) {
+          state.spectatorEntries = state.spectatorEntries.filter((se) => se.qrCode !== target.qrCode);
+        }
+        broadcastFullState();
+      }
+      break;
+    }
+
+    case 'DELETE_SPECTATOR_ENTRY': {
+      const { tournamentId, entryId } = payload;
+      const state = serverData.statesByTournament[tournamentId];
+      if (state) {
+        state.spectatorEntries = state.spectatorEntries.filter((se) => se.id !== entryId);
+        broadcastFullState();
+      }
+      break;
+    }
+
     case 'UPDATE_EVENT_DAYS': {
       const { tournamentId, eventDays } = payload;
       const state = serverData.statesByTournament[tournamentId];
@@ -746,6 +849,36 @@ function handleClientAction(
         if (tIdx !== -1) {
           serverData.tournaments[tIdx].eventDays = eventDays;
         }
+
+        // Sync spectatorTiers with first event day
+        const firstDay = eventDays && eventDays.length > 0 ? eventDays[0] : null;
+        if (firstDay) {
+          state.spectatorTiers = state.spectatorTiers.map((tier) => {
+            if (tier.type === 'VIP') {
+              return {
+                ...tier,
+                ...(firstDay.vipPrice !== undefined ? { price: Number(firstDay.vipPrice) } : {}),
+                ...(firstDay.vipEnabled !== undefined ? { enabled: firstDay.vipEnabled } : {}),
+              };
+            }
+            if (tier.type === 'ADULTO') {
+              return {
+                ...tier,
+                ...(firstDay.adultPrice !== undefined ? { price: Number(firstDay.adultPrice) } : {}),
+                ...(firstDay.adultEnabled !== undefined ? { enabled: firstDay.adultEnabled } : {}),
+              };
+            }
+            if (tier.type === 'NINO') {
+              return {
+                ...tier,
+                ...(firstDay.childPrice !== undefined ? { price: Number(firstDay.childPrice) } : {}),
+                ...(firstDay.childEnabled !== undefined ? { enabled: firstDay.childEnabled } : {}),
+              };
+            }
+            return tier;
+          });
+        }
+
         broadcastFullState();
       }
       break;
@@ -755,12 +888,11 @@ function handleClientAction(
       const { tournamentId } = payload;
       const state = serverData.statesByTournament[tournamentId];
       if (state) {
-        state.players = state.players.map((p) => ({
-          ...p,
-          checkedIn: false,
-          checkInTime: undefined,
-          duplicateAttempts: 0,
-        }));
+        state.players = state.players.map((p) => {
+          const copy = { ...p, checkedIn: false, duplicateAttempts: 0 };
+          delete copy.checkInTime;
+          return copy;
+        });
         state.spectatorEntries = [];
         state.beverages = state.beverages.map((b) => ({
           ...b,
@@ -809,6 +941,296 @@ app.post('/api/auth/login', (req, res) => {
   return res.json({ success: true, user: matched });
 });
 
+// AI Voucher Verification with Gemini 3.8 Flash
+app.post('/api/voucher/verify', async (req, res) => {
+  try {
+    const {
+      imageBase64,
+      expectedAmount,
+      paymentMethod,
+      officialHolder,
+      officialPhone,
+      bankName,
+      bankAccount,
+      bankCci,
+      buyerName,
+    } = req.body || {};
+
+    if (!imageBase64 || typeof imageBase64 !== 'string') {
+      return res.status(400).json({
+        success: false,
+        isValid: false,
+        reason: 'No se recibió ninguna imagen de comprobante para analizar.',
+      });
+    }
+
+    const cleanExpectedAmount = Math.round((Number(expectedAmount) || 0) * 100) / 100;
+    const cleanMethod = String(paymentMethod || 'YAPE').toUpperCase();
+    const cleanOfficialHolder = String(
+      officialHolder ||
+        (cleanMethod === 'TRANSFER'
+          ? serverData.config.bankHolder
+          : cleanMethod === 'PLIN'
+          ? serverData.config.plinHolder
+          : serverData.config.yapeHolder) ||
+        'Organización JJ Deportes'
+    ).trim();
+    const cleanOfficialPhone = String(
+      officialPhone ||
+        (cleanMethod === 'PLIN' ? serverData.config.plinPhone : serverData.config.yapePhone) ||
+        ''
+    ).trim();
+    const cleanBankName = String(bankName || serverData.config.bankName || 'BCP').trim();
+    const cleanBankAccount = String(bankAccount || serverData.config.bankAccount || '').trim();
+    const cleanBankHolder = String(
+      officialHolder || serverData.config.bankHolder || cleanOfficialHolder
+    ).trim();
+    const targetHolder = cleanMethod === 'TRANSFER' ? cleanBankHolder : cleanOfficialHolder;
+
+    if (cleanExpectedAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        isValid: false,
+        isLegitimateVoucher: false,
+        amountMatches: false,
+        recipientMatches: false,
+        detectedAmount: null,
+        expectedAmount: cleanExpectedAmount,
+        detectedRecipientName: null,
+        officialHolder: targetHolder,
+        reason: 'El monto total a cancelar debe ser mayor a S/ 0.00 para verificar el comprobante.',
+      });
+    }
+
+    // Extract mimeType and base64
+    let mimeType = 'image/jpeg';
+    let rawBase64 = imageBase64;
+    const match = imageBase64.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      mimeType = match[1];
+      rawBase64 = match[2];
+    }
+
+    const imageBuffer = Buffer.from(rawBase64, 'base64');
+    if (imageBuffer.length < 100) {
+      return res.json({
+        success: true,
+        isValid: false,
+        isLegitimateVoucher: false,
+        amountMatches: false,
+        recipientMatches: false,
+        detectedAmount: null,
+        expectedAmount: cleanExpectedAmount,
+        detectedRecipientName: null,
+        officialHolder: targetHolder,
+        confidence: 'LOW',
+        reason: 'La imagen del comprobante es demasiado pequeña o está dañada. Sube una captura válida y nítida.',
+        verificationEngine: 'OCR',
+      });
+    }
+
+    const runOcrFallback = async () => {
+      return verifyVoucherWithOcr({
+        imageBuffer,
+        expectedAmount: cleanExpectedAmount,
+        paymentMethod: cleanMethod,
+        officialHolder: targetHolder,
+        officialPhone: cleanOfficialPhone,
+        bankName: cleanBankName,
+        bankAccount: cleanBankAccount,
+        bankCci: String(bankCci || serverData.config.bankCci || ''),
+      });
+    };
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    const isRealApiKey = typeof apiKey === 'string' && apiKey.length > 20 && apiKey.startsWith('AIza');
+
+    if (!isRealApiKey) {
+      const ocrResult = await runOcrFallback();
+      return res.json(ocrResult);
+    }
+
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+
+    const verificationPrompt = `Eres un auditor financiero experto en verificación estricta de comprobantes y vouchers de pago peruanos (Yape, Plin y Transferencias bancarias del BCP, BBVA, Interbank, Scotiabank, Banco de la Nación, etc.).
+
+OBJETIVO DEL ANÁLISIS:
+Determinar si la imagen adjunta es un comprobante auténtico que cancela el monto EXACTO requerido para la compra de entradas y si fue pagado al titular oficial esperado.
+
+DATOS ESPERADOS:
+- Vía de pago: ${cleanMethod}
+- Monto exacto esperado: S/ ${cleanExpectedAmount.toFixed(2)} soles
+- Titular o Nombre oficial de la cuenta esperado: "${targetHolder}"
+${cleanMethod === 'YAPE' || cleanMethod === 'PLIN' ? `- Teléfono oficial esperado: "${cleanOfficialPhone}"` : ''}
+${cleanMethod === 'TRANSFER' ? `- Banco: "${cleanBankName}", Cuenta: "${cleanBankAccount}", CCI: "${bankCci || ''}"` : ''}
+- Nombre del comprador registrado: "${buyerName || 'No especificado'}"
+
+REGLAS ESTRICTAS DE EVALUACIÓN:
+1. Revisa si la imagen es un comprobante de pago bancario o billetera digital real.
+2. Extrae exactamente lo que está escrito en la imagen (NO inventes ni asumas datos que no se leen):
+   - "detectedAmount": Monto numérico exacto transferido en soles visible en el comprobante (ej. 20.00). Si no se aprecia, null.
+   - "detectedRecipientName": Nombre exacto del destinatario / beneficiario visible en el voucher (ej. a quién se envió el dinero o titular de cuenta destino). Si no se aprecia, null.
+   - "detectedRecipientPhone": Número de celular si aparece.
+   - "detectedOperationNumber": Número de operación, constancia o referencia.
+   - "detectedDate": Fecha y hora que figuran en el comprobante.
+3. VERIFICACIONES CRÍTICAS:
+   - "isLegitimateVoucher": true si es un comprobante de pago real. false si es una foto no relacionada, imagen en blanco o ilegible.
+   - "amountMatches": true SI Y SOLO SI "detectedAmount" coincide exactamente con ${cleanExpectedAmount.toFixed(2)} (tolerancia 0.05). Si es mayor, menor o no aparece, DEBE ser false.
+   - "recipientMatches": true SI Y SOLO SI el destinatario visible en el comprobante ("detectedRecipientName") corresponde claramente al titular oficial "${targetHolder}". Si el dinero se envió a otra persona o empresa, DEBE ser false.
+   - "isValid": true si y solo si isLegitimateVoucher == true, amountMatches == true y recipientMatches == true.
+4. "reason": Explicación clara en español del resultado.`;
+
+    const verificationConfig = {
+      responseMimeType: 'application/json',
+      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          isValid: { type: Type.BOOLEAN },
+          isLegitimateVoucher: { type: Type.BOOLEAN },
+          amountMatches: { type: Type.BOOLEAN },
+          recipientMatches: { type: Type.BOOLEAN },
+          detectedAmount: { type: Type.NUMBER },
+          detectedRecipientName: { type: Type.STRING },
+          detectedRecipientPhone: { type: Type.STRING },
+          detectedOperationNumber: { type: Type.STRING },
+          detectedDate: { type: Type.STRING },
+          confidence: { type: Type.STRING },
+          reason: { type: Type.STRING },
+        },
+        required: [
+          'isValid',
+          'isLegitimateVoucher',
+          'amountMatches',
+          'recipientMatches',
+          'reason',
+        ],
+      },
+    };
+
+    const runWithTimeout = <T>(promise: Promise<T>, ms = 7000): Promise<T> => {
+      let timer: NodeJS.Timeout;
+      const timeoutPromise = new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('TIMEOUT_EXCEEDED')), ms);
+      });
+      return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+    };
+
+    let response;
+    try {
+      response = await runWithTimeout(
+        ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: [
+            {
+              inlineData: {
+                mimeType,
+                data: rawBase64,
+              },
+            },
+            {
+              text: verificationPrompt,
+            },
+          ],
+          config: verificationConfig,
+        }),
+        7000
+      );
+    } catch (primaryErr: any) {
+      console.warn('Primary model error, attempting fallback to gemini-flash-latest:', primaryErr?.message);
+      try {
+        response = await runWithTimeout(
+          ai.models.generateContent({
+            model: 'gemini-flash-latest',
+            contents: [
+              {
+                inlineData: {
+                  mimeType,
+                  data: rawBase64,
+                },
+              },
+              {
+                text: verificationPrompt,
+              },
+            ],
+            config: verificationConfig,
+          }),
+          5000
+        );
+      } catch (fallbackErr: any) {
+        console.warn('Gemini fallback error, executing real OCR verifier:', fallbackErr?.message);
+        const ocrResult = await runOcrFallback();
+        return res.json(ocrResult);
+      }
+    }
+
+    const parsedJson = JSON.parse(response.text || '{}');
+    const numericAmount =
+      typeof parsedJson.detectedAmount === 'number' && Number.isFinite(parsedJson.detectedAmount)
+        ? Math.round(parsedJson.detectedAmount * 100) / 100
+        : null;
+    const detectedName = parsedJson.detectedRecipientName
+      ? String(parsedJson.detectedRecipientName).trim()
+      : null;
+
+    // Server-side deterministic enforcement on top of Gemini output
+    const isLegit = Boolean(parsedJson.isLegitimateVoucher);
+    const strictAmountMatches =
+      numericAmount !== null && Math.abs(numericAmount - cleanExpectedAmount) <= 0.05;
+    const strictRecipientMatches =
+      Boolean(parsedJson.recipientMatches) &&
+      detectedName !== null &&
+      doesRecipientMatch(detectedName, targetHolder);
+
+    const strictValid = isLegit && strictAmountMatches && strictRecipientMatches;
+
+    let finalReason = String(parsedJson.reason || '').trim();
+    if (!isLegit) {
+      finalReason = finalReason || 'La imagen adjunta no corresponde a un comprobante de pago válido.';
+    } else if (!strictAmountMatches && !strictRecipientMatches) {
+      finalReason = `Voucher rechazado: El monto detectado (${numericAmount !== null ? `S/ ${numericAmount.toFixed(2)}` : 'no detectado'}) no coincide con S/ ${cleanExpectedAmount.toFixed(2)}, y el destinatario (${detectedName || 'no detectado'}) no coincide con "${targetHolder}".`;
+    } else if (!strictAmountMatches) {
+      finalReason = `Monto incorrecto: El voucher muestra ${numericAmount !== null ? `S/ ${numericAmount.toFixed(2)}` : 'un monto ilegible'}, pero el total exacto a cancelar es S/ ${cleanExpectedAmount.toFixed(2)}.`;
+    } else if (!strictRecipientMatches) {
+      finalReason = `Titular no coincide: El comprobante fue enviado a "${detectedName || 'otro destinatario'}" en lugar de la cuenta oficial "${targetHolder}".`;
+    } else if (!finalReason) {
+      finalReason = `Comprobante verificado con éxito: S/ ${cleanExpectedAmount.toFixed(2)} transferidos a ${targetHolder}.`;
+    }
+
+    return res.json({
+      success: true,
+      ...parsedJson,
+      isValid: strictValid,
+      isLegitimateVoucher: isLegit,
+      amountMatches: strictAmountMatches,
+      recipientMatches: strictRecipientMatches,
+      detectedAmount: numericAmount,
+      detectedRecipientName: detectedName,
+      expectedAmount: cleanExpectedAmount,
+      officialHolder: targetHolder,
+      reason: finalReason,
+      verificationEngine: 'GEMINI',
+    });
+  } catch (error: any) {
+    console.error('Error al verificar comprobante:', error);
+    return res.status(500).json({
+      success: false,
+      isValid: false,
+      isLegitimateVoucher: false,
+      amountMatches: false,
+      recipientMatches: false,
+      reason: `Error al procesar el comprobante: ${error?.message || 'Error de conexión con el servicio de verificación'}`,
+    });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -828,7 +1250,14 @@ async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        allowedHosts: true,
+        ws: {
+          server,
+          path: '/vite-ws',
+        },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);

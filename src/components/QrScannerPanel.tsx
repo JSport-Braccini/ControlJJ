@@ -462,7 +462,7 @@ export const QrScannerPanel: React.FC<QrScannerPanelProps> = ({
                     <QrCodeImage value={bev.qrCode} size={76} label={bev.name} />
                     <h4 className="mt-2 text-xs font-bold text-slate-900">{bev.name}</h4>
                     <div className="text-[11px] text-slate-500 font-mono-tabular">
-                      Stock: {bev.stock} uds.
+                      Stock: {bev.stock} unidades
                     </div>
                     <div className="mt-1 text-sm font-bold font-mono-tabular text-slate-900">
                       S/ {bev.price.toFixed(2)}
